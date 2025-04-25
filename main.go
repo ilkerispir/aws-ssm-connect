@@ -18,27 +18,32 @@ import (
 	"gopkg.in/ini.v1"
 )
 
-// Instance holds ID and optional Name tag
+// Instance holds ID, optional Name tag, and VPC
 type Instance struct {
-	ID   string
-	Name string
+	ID    string
+	Name  string
+	VpcID string
 }
 
-// DB holds an RDS endpoint and its port
+// DB holds an RDS endpoint, its port, and VPC
 type DB struct {
 	Endpoint string
 	Port     string
+	VpcID    string
 }
 
-// ProfileItem stores menu items for a profile
+// ProfileItem stores menu items per profile
 type ProfileItem struct {
 	Name      string
 	Instances []*systray.MenuItem
+	DBItems   []*systray.MenuItem
 }
 
 var (
-	profiles = make(map[string]*ProfileItem)
-	awsPid   int
+	profiles     = make(map[string]*ProfileItem)
+	profileMenus []*systray.MenuItem
+	backItem     *systray.MenuItem
+	awsPid       int
 )
 
 // loadAWSProfiles reads profile names from ~/.aws/config
@@ -67,7 +72,6 @@ func ensureSSOLogin(profile string) error {
 	return cmd.Run()
 }
 
-// isAuthErr detects expired/unauthorized errors
 func isAuthErr(err error) bool {
 	e := err.Error()
 	return strings.Contains(e, "NotAuthorizedForSourceException") ||
@@ -75,9 +79,8 @@ func isAuthErr(err error) bool {
 		strings.Contains(e, "InvalidGrantException")
 }
 
-// fetchInstances lists SSM-managed instances and retries login on auth errors
+// fetchInstances lists SSM-managed instances + their VPCs
 func fetchInstances(profile string) ([]Instance, error) {
-	// initial config load
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile))
 	if err != nil && isAuthErr(err) {
 		if loginErr := ensureSSOLogin(profile); loginErr != nil {
@@ -91,7 +94,6 @@ func fetchInstances(profile string) ([]Instance, error) {
 
 	ssmClient := ssm.NewFromConfig(cfg)
 	paginator := ssm.NewDescribeInstanceInformationPaginator(ssmClient, &ssm.DescribeInstanceInformationInput{})
-
 	var ids []string
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(context.TODO())
@@ -109,15 +111,12 @@ func fetchInstances(profile string) ([]Instance, error) {
 			ids = append(ids, *info.InstanceId)
 		}
 	}
-
 	if len(ids) == 0 {
 		return nil, nil
 	}
 
 	ec2Client := ec2.NewFromConfig(cfg)
-	desc, err := ec2Client.DescribeInstances(context.TODO(), &ec2.DescribeInstancesInput{
-		InstanceIds: ids,
-	})
+	desc, err := ec2Client.DescribeInstances(context.TODO(), &ec2.DescribeInstancesInput{InstanceIds: ids})
 	if err != nil {
 		return nil, err
 	}
@@ -132,13 +131,17 @@ func fetchInstances(profile string) ([]Instance, error) {
 					break
 				}
 			}
-			result = append(result, Instance{ID: *inst.InstanceId, Name: name})
+			vpc := ""
+			if inst.VpcId != nil {
+				vpc = *inst.VpcId
+			}
+			result = append(result, Instance{ID: *inst.InstanceId, Name: name, VpcID: vpc})
 		}
 	}
 	return result, nil
 }
 
-// fetchDBs lists RDS instances and retries login on auth errors
+// fetchDBs lists RDS instances + their VPCs
 func fetchDBs(profile string) ([]DB, error) {
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile))
 	if err != nil && isAuthErr(err) {
@@ -173,7 +176,11 @@ func fetchDBs(profile string) ([]DB, error) {
 		} else if strings.Contains(eng, "postgres") {
 			port = "5432"
 		}
-		dbs = append(dbs, DB{Endpoint: ep, Port: port})
+		vpc := ""
+		if inst.DBSubnetGroup != nil && inst.DBSubnetGroup.VpcId != nil {
+			vpc = *inst.DBSubnetGroup.VpcId
+		}
+		dbs = append(dbs, DB{Endpoint: ep, Port: port, VpcID: vpc})
 	}
 	return dbs, nil
 }
@@ -209,89 +216,113 @@ func startSession(profile, target, host, port string) {
 	systray.SetTooltip(fmt.Sprintf("%s:%s → localhost:%s", host, port, port))
 }
 
+// showProfiles hides all submenus and shows only profile list
+func showProfiles() {
+	backItem.Hide()
+	for _, m := range profileMenus {
+		m.Show()
+	}
+	for _, pi := range profiles {
+		for _, inst := range pi.Instances {
+			inst.Hide()
+		}
+		pi.Instances = nil
+		for _, db := range pi.DBItems {
+			db.Hide()
+		}
+		pi.DBItems = nil
+	}
+}
+
+// showInstances displays EC2 instances for a profile
+func showInstances(pi *ProfileItem) {
+	for _, m := range profileMenus {
+		m.Hide()
+	}
+	backItem.Show()
+
+	insts, err := fetchInstances(pi.Name)
+	if err != nil {
+		log.Printf("fetch instances %s: %v", pi.Name, err)
+		return
+	}
+	// clear old
+	for _, inst := range pi.Instances {
+		inst.Hide()
+	}
+	pi.Instances = nil
+	for _, db := range pi.DBItems {
+		db.Hide()
+	}
+	pi.DBItems = nil
+
+	// list EC2
+	for _, inst := range insts {
+		label := inst.ID
+		if inst.Name != "" {
+			label = fmt.Sprintf("%s (%s)", inst.Name, inst.ID)
+		}
+		m := systray.AddMenuItem("🖥 "+label, "select instance")
+		pi.Instances = append(pi.Instances, m)
+		go func(inst Instance, menu *systray.MenuItem) {
+			for range menu.ClickedCh {
+				showDBs(pi, inst)
+			}
+		}(inst, m)
+	}
+}
+
+// showDBs displays only RDS items in same VPC as inst
+func showDBs(pi *ProfileItem, inst Instance) {
+	// hide EC2 list
+	for _, instMenu := range pi.Instances {
+		instMenu.Hide()
+	}
+	// clear old DBs
+	for _, dbItem := range pi.DBItems {
+		dbItem.Hide()
+	}
+	pi.DBItems = nil
+	backItem.Show()
+
+	dbs, err := fetchDBs(pi.Name)
+	if err != nil {
+		log.Printf("fetch dbs %s: %v", pi.Name, err)
+		return
+	}
+	for _, db := range dbs {
+		if db.VpcID != inst.VpcID {
+			continue
+		}
+		label := fmt.Sprintf("🔒 %s:%s", db.Endpoint, db.Port)
+		m := systray.AddMenuItemCheckbox(label, "forward db", false)
+		pi.DBItems = append(pi.DBItems, m)
+		go func(inst Instance, db DB, menu *systray.MenuItem) {
+			for range menu.ClickedCh {
+				startSession(pi.Name, inst.ID, db.Endpoint, db.Port)
+				menu.Check()
+				// uncheck siblings
+				for _, sib := range pi.DBItems {
+					if sib != menu {
+						sib.Uncheck()
+					}
+				}
+			}
+		}(inst, db, m)
+	}
+}
+
 func onReady() {
 	systray.SetTitle("SSM Connect")
 
-	backItem := systray.AddMenuItem("← back to profiles", "go back")
+	// back button
+	backItem = systray.AddMenuItem("← back to profiles", "go back to profile list")
 	backItem.Hide()
-
+	// quit
 	quit := systray.AddMenuItem("Quit", "exit")
 	go func() { <-quit.ClickedCh; systray.Quit() }()
 
-	var profileMenus []*systray.MenuItem
-
-	showProfiles := func() {
-		backItem.Hide()
-		for _, m := range profileMenus {
-			m.Show()
-		}
-		for _, p := range profiles {
-			for _, imi := range p.Instances {
-				imi.Hide()
-			}
-		}
-	}
-
-	showInstances := func(pi *ProfileItem) {
-		for _, m := range profileMenus {
-			m.Hide()
-		}
-		backItem.Show()
-
-		insts, err := fetchInstances(pi.Name)
-		if err != nil {
-			log.Printf("fetch instances %s: %v", pi.Name, err)
-			return
-		}
-
-		for _, old := range pi.Instances {
-			old.Hide()
-		}
-		pi.Instances = nil
-
-		dbs, _ := fetchDBs(pi.Name)
-
-		for _, inst := range insts {
-			label := inst.ID
-			if inst.Name != "" {
-				label = fmt.Sprintf("%s (%s)", inst.Name, inst.ID)
-			}
-			imi := systray.AddMenuItemCheckbox("  🖥 "+label, "forward port", false)
-			pi.Instances = append(pi.Instances, imi)
-
-			go func(instanceID string, menuItem *systray.MenuItem) {
-				for range menuItem.ClickedCh {
-					startSession(pi.Name, instanceID, "127.0.0.1", "80")
-					menuItem.Check()
-					for _, sib := range pi.Instances {
-						if sib != menuItem {
-							sib.Uncheck()
-						}
-					}
-				}
-			}(inst.ID, imi)
-
-			if len(dbs) > 0 {
-				systray.AddSeparator()
-				for _, db := range dbs {
-					dbLabel := fmt.Sprintf("    🔒 %s:%s", db.Endpoint, db.Port)
-					dbItem := systray.AddMenuItemCheckbox(dbLabel, "forward DB", false)
-					go func(host, port, target string, menuItem *systray.MenuItem) {
-						for range menuItem.ClickedCh {
-							startSession(pi.Name, target, host, port)
-							menuItem.Check()
-							for _, sib := range pi.Instances {
-								if sib != menuItem {
-									sib.Uncheck()
-								}
-							}
-						}
-					}(db.Endpoint, db.Port, inst.ID, dbItem)
-				}
-			}
-		}
-	}
-
+	// load profiles
 	names, err := loadAWSProfiles()
 	if err != nil {
 		log.Fatalf("cannot load profiles: %v", err)
@@ -300,21 +331,14 @@ func onReady() {
 		pi := &ProfileItem{Name: name}
 		profiles[name] = pi
 
-		m := systray.AddMenuItem(name, "select profile")
-		profileMenus = append(profileMenus, m)
-
-		go func(item *ProfileItem, menuItem *systray.MenuItem) {
-			for range menuItem.ClickedCh {
-				showInstances(item)
+		menu := systray.AddMenuItem(name, "select profile")
+		profileMenus = append(profileMenus, menu)
+		go func(pi *ProfileItem, m *systray.MenuItem) {
+			for range m.ClickedCh {
+				showInstances(pi)
 			}
-		}(pi, m)
+		}(pi, menu)
 	}
-
-	go func() {
-		for range backItem.ClickedCh {
-			showProfiles()
-		}
-	}()
 
 	showProfiles()
 }
