@@ -19,20 +19,21 @@ import (
 )
 
 // Instance holds ID, optional Name tag, and VPC
+// DB holds an RDS endpoint, its port, and VPC
+// ProfileItem stores menu items per profile
+
 type Instance struct {
 	ID    string
 	Name  string
 	VpcID string
 }
 
-// DB holds an RDS endpoint, its port, and VPC
 type DB struct {
 	Endpoint string
 	Port     string
 	VpcID    string
 }
 
-// ProfileItem stores menu items per profile
 type ProfileItem struct {
 	Name      string
 	Instances []*systray.MenuItem
@@ -216,7 +217,7 @@ func startSession(profile, target, host, port string) {
 	systray.SetTooltip(fmt.Sprintf("%s:%s → localhost:%s", host, port, port))
 }
 
-// showProfiles hides all submenus and shows only profile list
+// showProfiles hides submenus and shows profile list
 func showProfiles() {
 	backItem.Hide()
 	for _, m := range profileMenus {
@@ -256,7 +257,6 @@ func showInstances(pi *ProfileItem) {
 	}
 	pi.DBItems = nil
 
-	// list EC2
 	for _, inst := range insts {
 		label := inst.ID
 		if inst.Name != "" {
@@ -272,13 +272,11 @@ func showInstances(pi *ProfileItem) {
 	}
 }
 
-// showDBs displays only RDS items in same VPC as inst
+// showDBs displays RDS items in same VPC as instance
 func showDBs(pi *ProfileItem, inst Instance) {
-	// hide EC2 list
 	for _, instMenu := range pi.Instances {
 		instMenu.Hide()
 	}
-	// clear old DBs
 	for _, dbItem := range pi.DBItems {
 		dbItem.Hide()
 	}
@@ -301,7 +299,6 @@ func showDBs(pi *ProfileItem, inst Instance) {
 			for range menu.ClickedCh {
 				startSession(pi.Name, inst.ID, db.Endpoint, db.Port)
 				menu.Check()
-				// uncheck siblings
 				for _, sib := range pi.DBItems {
 					if sib != menu {
 						sib.Uncheck()
@@ -318,9 +315,19 @@ func onReady() {
 	// back button
 	backItem = systray.AddMenuItem("← back to profiles", "go back to profile list")
 	backItem.Hide()
+	// attach back button handler
+	go func() {
+		for range backItem.ClickedCh {
+			showProfiles()
+		}
+	}()
+
 	// quit
 	quit := systray.AddMenuItem("Quit", "exit")
-	go func() { <-quit.ClickedCh; systray.Quit() }()
+	go func() {
+		<-quit.ClickedCh
+		systray.Quit()
+	}()
 
 	// load profiles
 	names, err := loadAWSProfiles()
