@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -361,5 +362,20 @@ func onReady() {
 }
 
 func main() {
+	// create a channel to listen for OS interrupt signals (e.g., CTRL+C)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	// handle shutdown in a separate goroutine
+	go func() {
+		<-c // wait for the signal
+		if awsPid != 0 {
+			// send SIGKILL to the whole process group (negative PID means group)
+			_ = syscall.Kill(-awsPid, syscall.SIGKILL)
+		}
+		os.Exit(0) // terminate the app
+	}()
+
+	// start the tray app
 	systray.Run(onReady, nil)
 }
