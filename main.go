@@ -183,11 +183,16 @@ func fetchDBs(profile string) ([]DB, error) {
 		ep := *inst.Endpoint.Address
 		port := fmt.Sprint(*inst.Endpoint.Port)
 		eng := strings.ToLower(*inst.Engine)
-		if strings.Contains(eng, "mysql") {
+
+		switch {
+		case strings.Contains(eng, "mysql"), strings.Contains(eng, "mariadb"), strings.Contains(eng, "aurora-mysql"):
 			port = "3306"
-		} else if strings.Contains(eng, "postgres") {
+		case strings.Contains(eng, "postgres"), strings.Contains(eng, "aurora-postgresql"):
 			port = "5432"
+		case strings.Contains(eng, "sqlserver"):
+			port = "1433"
 		}
+
 		vpc := ""
 		if inst.DBSubnetGroup != nil && inst.DBSubnetGroup.VpcId != nil {
 			vpc = *inst.DBSubnetGroup.VpcId
