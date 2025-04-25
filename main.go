@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -63,6 +64,9 @@ func loadAWSProfiles() ([]string, error) {
 			names = append(names, strings.TrimPrefix(n, "profile "))
 		}
 	}
+
+	sort.Strings(names)
+
 	return names, nil
 }
 
@@ -141,6 +145,11 @@ func fetchInstances(profile string) ([]Instance, error) {
 			result = append(result, Instance{ID: *inst.InstanceId, Name: name, VpcID: vpc})
 		}
 	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+
 	return result, nil
 }
 
@@ -185,6 +194,11 @@ func fetchDBs(profile string) ([]DB, error) {
 		}
 		dbs = append(dbs, DB{Endpoint: ep, Port: port, VpcID: vpc})
 	}
+
+	sort.Slice(dbs, func(i, j int) bool {
+		return dbs[i].Endpoint < dbs[j].Endpoint
+	})
+
 	return dbs, nil
 }
 
