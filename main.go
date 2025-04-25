@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -189,8 +190,10 @@ func fetchDBs(profile string) ([]DB, error) {
 // startSession starts port forwarding via AWS CLI
 func startSession(profile, target, host, port string) {
 	if awsPid != 0 {
-		exec.Command("kill", "-9", fmt.Sprint(awsPid)).Run()
+		// kill entire process group
+		_ = syscall.Kill(-awsPid, syscall.SIGKILL)
 	}
+
 	cmd := exec.Command(
 		"aws", "ssm", "start-session",
 		"--profile", profile,
@@ -199,6 +202,10 @@ func startSession(profile, target, host, port string) {
 		"--parameters",
 		fmt.Sprintf("host=[\"%s\"],portNumber=[\"%s\"],localPortNumber=[\"%s\"]", host, port, port),
 	)
+
+	// start in a new process group
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	out, _ := cmd.StdoutPipe()
 	if err := cmd.Start(); err != nil {
 		systray.SetTooltip("session error: " + err.Error())
@@ -326,6 +333,9 @@ func onReady() {
 	quit := systray.AddMenuItem("Quit", "exit")
 	go func() {
 		<-quit.ClickedCh
+		if awsPid != 0 {
+			_ = syscall.Kill(-awsPid, syscall.SIGKILL) // kill process group
+		}
 		systray.Quit()
 	}()
 
