@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	_ "embed"
 	"fmt"
 	"log"
 	"os"
@@ -44,6 +45,8 @@ type ProfileItem struct {
 }
 
 var (
+	//go:embed assets/icon.png
+	iconData     []byte
 	profiles     = make(map[string]*ProfileItem)
 	profileMenus []*systray.MenuItem
 	backItem     *systray.MenuItem
@@ -337,7 +340,7 @@ func showDBs(pi *ProfileItem, inst Instance) {
 }
 
 func onReady() {
-	systray.SetTitle("SSM Connect")
+	systray.SetIcon(iconData)
 
 	// back button
 	backItem = systray.AddMenuItem("← back to profiles", "go back to profile list")
