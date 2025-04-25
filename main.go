@@ -72,30 +72,48 @@ func isAuthErr(err error) bool {
 	e := err.Error()
 	return strings.Contains(e, "NotAuthorizedForSourceException") ||
 		strings.Contains(e, "expired token") ||
-		strings.Contains(e, "Unauthorized")
+		strings.Contains(e, "InvalidGrantException")
 }
 
-// fetchInstances lists SSM-managed instances and retrieves their Name tags via EC2
+// fetchInstances lists SSM-managed instances and retries login on auth errors
 func fetchInstances(profile string) ([]Instance, error) {
+	// initial config load
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile))
+	if err != nil && isAuthErr(err) {
+		if loginErr := ensureSSOLogin(profile); loginErr != nil {
+			return nil, fmt.Errorf("SSO login failed: %w", loginErr)
+		}
+		cfg, err = config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile))
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	ssmClient := ssm.NewFromConfig(cfg)
 	paginator := ssm.NewDescribeInstanceInformationPaginator(ssmClient, &ssm.DescribeInstanceInformationInput{})
+
 	var ids []string
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(context.TODO())
 		if err != nil {
+			if isAuthErr(err) {
+				if loginErr := ensureSSOLogin(profile); loginErr != nil {
+					return nil, fmt.Errorf("login during paging failed: %w", loginErr)
+				}
+				paginator = ssm.NewDescribeInstanceInformationPaginator(ssmClient, &ssm.DescribeInstanceInformationInput{})
+				continue
+			}
 			return nil, err
 		}
 		for _, info := range page.InstanceInformationList {
 			ids = append(ids, *info.InstanceId)
 		}
 	}
+
 	if len(ids) == 0 {
 		return nil, nil
 	}
+
 	ec2Client := ec2.NewFromConfig(cfg)
 	desc, err := ec2Client.DescribeInstances(context.TODO(), &ec2.DescribeInstancesInput{
 		InstanceIds: ids,
@@ -103,6 +121,7 @@ func fetchInstances(profile string) ([]Instance, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var result []Instance
 	for _, res := range desc.Reservations {
 		for _, inst := range res.Instances {
@@ -119,17 +138,31 @@ func fetchInstances(profile string) ([]Instance, error) {
 	return result, nil
 }
 
-// fetchDBs lists all RDS instances in the profile
+// fetchDBs lists RDS instances and retries login on auth errors
 func fetchDBs(profile string) ([]DB, error) {
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile))
+	if err != nil && isAuthErr(err) {
+		if loginErr := ensureSSOLogin(profile); loginErr != nil {
+			return nil, fmt.Errorf("SSO login for RDS failed: %w", loginErr)
+		}
+		cfg, err = config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile))
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	rdsClient := rds.NewFromConfig(cfg)
 	out, err := rdsClient.DescribeDBInstances(context.TODO(), &rds.DescribeDBInstancesInput{})
+	if err != nil && isAuthErr(err) {
+		if loginErr := ensureSSOLogin(profile); loginErr != nil {
+			return nil, fmt.Errorf("login during RDS fetch failed: %w", loginErr)
+		}
+		out, err = rdsClient.DescribeDBInstances(context.TODO(), &rds.DescribeDBInstancesInput{})
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	var dbs []DB
 	for _, inst := range out.DBInstances {
 		ep := *inst.Endpoint.Address
@@ -206,13 +239,6 @@ func onReady() {
 		backItem.Show()
 
 		insts, err := fetchInstances(pi.Name)
-		if err != nil && isAuthErr(err) {
-			if loginErr := ensureSSOLogin(pi.Name); loginErr != nil {
-				log.Printf("login failed %s: %v", pi.Name, loginErr)
-				return
-			}
-			insts, err = fetchInstances(pi.Name)
-		}
 		if err != nil {
 			log.Printf("fetch instances %s: %v", pi.Name, err)
 			return
@@ -293,8 +319,6 @@ func onReady() {
 	showProfiles()
 }
 
-func onExit() {}
-
 func main() {
-	systray.Run(onReady, onExit)
+	systray.Run(onReady, nil)
 }
