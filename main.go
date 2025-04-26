@@ -207,7 +207,7 @@ func main() {
 	fmt.Printf("Instances in profile '%s':\n", profile)
 	fmt.Println("──────────────────────────────")
 	for i, inst := range instances {
-		fmt.Printf("[%2d] 🖥 %s (%s)\n", i+1, inst.Name, inst.ID)
+		fmt.Printf("[%2d] 🖥  %s (%s)\n", i+1, inst.Name, inst.ID)
 	}
 	fmt.Print("\nSelect an instance number: ")
 	sel, _ = reader.ReadString('\n')
@@ -238,7 +238,7 @@ func main() {
 		return
 	}
 	for i, db := range filteredDBs {
-		fmt.Printf("[%2d] 🛢️ %s:%s\n", i+1, db.Endpoint, db.Port)
+		fmt.Printf("[%2d] 🛢️  %s:%s\n", i+1, db.Endpoint, db.Port)
 	}
 	fmt.Print("\nSelect a database number: ")
 	sel, _ = reader.ReadString('\n')
