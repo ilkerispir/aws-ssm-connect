@@ -86,7 +86,8 @@ func isAuthErr(err error) bool {
 	e := err.Error()
 	return strings.Contains(e, "NotAuthorizedForSourceException") ||
 		strings.Contains(e, "expired token") ||
-		strings.Contains(e, "InvalidGrantException")
+		strings.Contains(e, "InvalidGrantException") ||
+		strings.Contains(e, "no such file or directory")
 }
 
 // fetchInstances lists SSM-managed instances + their VPCs
