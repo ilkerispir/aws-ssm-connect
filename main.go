@@ -322,7 +322,7 @@ func showDBs(pi *ProfileItem, inst Instance) {
 		if db.VpcID != inst.VpcID {
 			continue
 		}
-		label := fmt.Sprintf("🔒 %s:%s", db.Endpoint, db.Port)
+		label := fmt.Sprintf("🛢️ %s:%s", db.Endpoint, db.Port)
 		m := systray.AddMenuItemCheckbox(label, "forward db", false)
 		pi.DBItems = append(pi.DBItems, m)
 		go func(inst Instance, db DB, menu *systray.MenuItem) {
