@@ -1,4 +1,4 @@
-module github.com/ilkerispir/aws-ssm-connect
+module github.com/ilkerispir/aws-ssm-rds-proxy
 
 go 1.24.2
 
