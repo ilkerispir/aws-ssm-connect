@@ -133,9 +133,9 @@ func formatDBLabel(db DB) string {
 	var prefix string
 	switch db.Role {
 	case "writer":
-		prefix = " ✍️  [Writer] "
+		prefix = "✍️ [Writer] "
 	case "reader":
-		prefix = " 📖 [Reader] "
+		prefix = "📖 [Reader] "
 	default:
 		prefix = ""
 	}
@@ -284,7 +284,7 @@ func main() {
 	}()
 
 	if sel, err := readLastSelection(); err == nil {
-		fmt.Printf("Previous selection detected:\n☁️ Profile: %s\n🖥 Instance: %s\n🛢️ Database: %s:%s\n", sel.Profile, sel.InstanceID, sel.DBEndpoint, sel.DBPort)
+		fmt.Printf("Previous selection detected:\n☁️ Profile: %s\n🖥  Instance: %s\n🛢️ Database: %s:%s\n", sel.Profile, sel.InstanceID, sel.DBEndpoint, sel.DBPort)
 		prompt := promptui.Prompt{
 			Label:     "Do you want to reuse it? (y/N)",
 			IsConfirm: true,
@@ -323,7 +323,7 @@ func main() {
 	}
 	var instOptions []string
 	for _, inst := range instances {
-		instOptions = append(instOptions, fmt.Sprintf("🖥 %s (%s)", inst.Name, inst.ID))
+		instOptions = append(instOptions, fmt.Sprintf("🖥  %s (%s)", inst.Name, inst.ID))
 	}
 	instancePrompt := promptui.Select{
 		Label: fmt.Sprintf("Select Instance for profile '%s'", profile),
