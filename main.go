@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	"github.com/manifoldco/promptui"
 	"gopkg.in/ini.v1"
 )
 
@@ -32,13 +33,19 @@ type DB struct {
 	VpcID    string
 }
 
-var awsPid int
-
-func clearScreen() {
-	fmt.Print("\033[H\033[2J")
+type LastSelection struct {
+	Profile    string `json:"profile"`
+	InstanceID string `json:"instance_id"`
+	DBEndpoint string `json:"db_endpoint"`
+	DBPort     string `json:"db_port"`
 }
 
-func loadAWSProfiles() ([]string, error) {
+var (
+	awsPid            int
+	lastSelectionPath = filepath.Join(os.Getenv("HOME"), ".aws-ssm-rds-proxy", "last-selections.json")
+)
+
+func fetchProfiles() ([]string, error) {
 	path := filepath.Join(os.Getenv("HOME"), ".aws", "config")
 	cfg, err := ini.Load(path)
 	if err != nil {
@@ -55,6 +62,15 @@ func loadAWSProfiles() ([]string, error) {
 	return names, nil
 }
 
+func ensureSSOLogin(profile string) error {
+	fmt.Printf("⚡ Attempting SSO login for profile '%s'...\n", profile)
+	cmd := exec.Command("aws", "sso", "login", "--profile", profile)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
 func fetchInstances(profile string) ([]Instance, error) {
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile))
 	if err != nil {
@@ -66,6 +82,15 @@ func fetchInstances(profile string) ([]Instance, error) {
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(context.TODO())
 		if err != nil {
+			if strings.Contains(err.Error(), "InvalidGrantException") || strings.Contains(err.Error(), "token expired") {
+				if loginErr := ensureSSOLogin(profile); loginErr != nil {
+					return nil, fmt.Errorf("SSO login failed: %v", loginErr)
+				}
+				cfg, _ = config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile))
+				ssmClient = ssm.NewFromConfig(cfg)
+				paginator = ssm.NewDescribeInstanceInformationPaginator(ssmClient, &ssm.DescribeInstanceInformationInput{})
+				continue
+			}
 			return nil, err
 		}
 		for _, info := range page.InstanceInformationList {
@@ -80,7 +105,6 @@ func fetchInstances(profile string) ([]Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	var result []Instance
 	for _, res := range desc.Reservations {
 		for _, inst := range res.Instances {
@@ -112,15 +136,25 @@ func fetchDBs(profile string) ([]DB, error) {
 	rdsClient := rds.NewFromConfig(cfg)
 	out, err := rdsClient.DescribeDBInstances(context.TODO(), &rds.DescribeDBInstancesInput{})
 	if err != nil {
-		return nil, err
+		if strings.Contains(err.Error(), "InvalidGrantException") || strings.Contains(err.Error(), "token expired") {
+			if loginErr := ensureSSOLogin(profile); loginErr != nil {
+				return nil, fmt.Errorf("SSO login failed: %v", loginErr)
+			}
+			cfg, _ = config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile))
+			rdsClient = rds.NewFromConfig(cfg)
+			out, err = rdsClient.DescribeDBInstances(context.TODO(), &rds.DescribeDBInstancesInput{})
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
 	}
-
 	var dbs []DB
 	for _, inst := range out.DBInstances {
 		ep := *inst.Endpoint.Address
 		port := fmt.Sprint(*inst.Endpoint.Port)
 		eng := strings.ToLower(*inst.Engine)
-
 		switch {
 		case strings.Contains(eng, "mysql"), strings.Contains(eng, "mariadb"), strings.Contains(eng, "aurora-mysql"):
 			port = "3306"
@@ -129,7 +163,6 @@ func fetchDBs(profile string) ([]DB, error) {
 		case strings.Contains(eng, "sqlserver"):
 			port = "1433"
 		}
-
 		vpc := ""
 		if inst.DBSubnetGroup != nil && inst.DBSubnetGroup.VpcId != nil {
 			vpc = *inst.DBSubnetGroup.VpcId
@@ -162,10 +195,31 @@ func startPortForward(profile, instanceID, host, port string) error {
 	return cmd.Wait()
 }
 
-func main() {
-	reader := bufio.NewReader(os.Stdin)
+func readLastSelection() (*LastSelection, error) {
+	data, err := os.ReadFile(lastSelectionPath)
+	if err != nil {
+		return nil, err
+	}
+	var sel LastSelection
+	if err := json.Unmarshal(data, &sel); err != nil {
+		return nil, err
+	}
+	return &sel, nil
+}
 
-	// listen CTRL+C to cleanup
+func writeLastSelection(sel *LastSelection) error {
+	dir := filepath.Dir(lastSelectionPath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(sel, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(lastSelectionPath, data, 0600)
+}
+
+func main() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -177,80 +231,101 @@ func main() {
 		os.Exit(0)
 	}()
 
-	clearScreen()
-	fmt.Println("──────────────────────────────")
-	fmt.Println("Available AWS Profiles:")
-	fmt.Println("──────────────────────────────")
-	profiles, err := loadAWSProfiles()
+	if sel, err := readLastSelection(); err == nil {
+		fmt.Printf("Previous selection detected:\n☁️ Profile: %s\n🖥 Instance: %s\n🛢️ Database: %s:%s\n", sel.Profile, sel.InstanceID, sel.DBEndpoint, sel.DBPort)
+		prompt := promptui.Prompt{
+			Label:     "Do you want to reuse it? (y/N)",
+			IsConfirm: true,
+		}
+		result, _ := prompt.Run()
+		if strings.ToLower(result) == "y" {
+			if err := startPortForward(sel.Profile, sel.InstanceID, sel.DBEndpoint, sel.DBPort); err != nil {
+				log.Fatalf("port forwarding failed: %v", err)
+			}
+			return
+		}
+	}
+
+	profiles, err := fetchProfiles()
 	if err != nil {
 		log.Fatalf("load profiles failed: %v", err)
 	}
-	for i, p := range profiles {
-		fmt.Printf("[%2d] ☁️  %s\n", i+1, p)
+	profilePrompt := promptui.Select{
+		Label: "Select AWS Profile",
+		Items: profiles,
+		Searcher: func(input string, index int) bool {
+			profile := profiles[index]
+			input = strings.ToLower(input)
+			return strings.Contains(strings.ToLower(profile), input)
+		},
 	}
-	fmt.Print("\nSelect a profile number: ")
-	sel, _ := reader.ReadString('\n')
-	sel = strings.TrimSpace(sel)
-	idx := 0
-	fmt.Sscanf(sel, "%d", &idx)
-	if idx <= 0 || idx > len(profiles) {
-		log.Fatal("invalid selection")
+	idx, _, err := profilePrompt.Run()
+	if err != nil {
+		log.Fatalf("prompt failed: %v", err)
 	}
-	profile := profiles[idx-1]
+	profile := profiles[idx]
 
-	clearScreen()
 	instances, err := fetchInstances(profile)
 	if err != nil {
 		log.Fatalf("fetch instances failed: %v", err)
 	}
-	fmt.Println("──────────────────────────────")
-	fmt.Printf("Instances in profile '%s':\n", profile)
-	fmt.Println("──────────────────────────────")
-	for i, inst := range instances {
-		fmt.Printf("[%2d] 🖥  %s (%s)\n", i+1, inst.Name, inst.ID)
+	var instOptions []string
+	for _, inst := range instances {
+		instOptions = append(instOptions, fmt.Sprintf("🖥 %s (%s)", inst.Name, inst.ID))
 	}
-	fmt.Print("\nSelect an instance number: ")
-	sel, _ = reader.ReadString('\n')
-	sel = strings.TrimSpace(sel)
-	idx = 0
-	fmt.Sscanf(sel, "%d", &idx)
-	if idx <= 0 || idx > len(instances) {
-		log.Fatal("invalid selection")
+	instancePrompt := promptui.Select{
+		Label: fmt.Sprintf("Select Instance for profile '%s'", profile),
+		Items: instOptions,
+		Searcher: func(input string, index int) bool {
+			inst := instOptions[index]
+			input = strings.ToLower(input)
+			return strings.Contains(strings.ToLower(inst), input)
+		},
 	}
-	instance := instances[idx-1]
+	idx, _, err = instancePrompt.Run()
+	if err != nil {
+		log.Fatalf("prompt failed: %v", err)
+	}
+	instance := instances[idx]
 
-	clearScreen()
 	dbs, err := fetchDBs(profile)
 	if err != nil {
 		log.Fatalf("fetch dbs failed: %v", err)
 	}
-	fmt.Println("──────────────────────────────")
-	fmt.Println("Databases in same VPC:")
-	fmt.Println("──────────────────────────────")
-	filteredDBs := []DB{}
+	var dbOptions []DB
+	var dbLabels []string
 	for _, db := range dbs {
 		if db.VpcID == instance.VpcID {
-			filteredDBs = append(filteredDBs, db)
+			dbOptions = append(dbOptions, db)
+			dbLabels = append(dbLabels, fmt.Sprintf("🛢️ %s:%s", db.Endpoint, db.Port))
 		}
 	}
-	if len(filteredDBs) == 0 {
+	if len(dbOptions) == 0 {
 		fmt.Println("No databases found in the same VPC.")
 		return
 	}
-	for i, db := range filteredDBs {
-		fmt.Printf("[%2d] 🛢️  %s:%s\n", i+1, db.Endpoint, db.Port)
+	dbPrompt := promptui.Select{
+		Label: "Select Database",
+		Items: dbLabels,
+		Searcher: func(input string, index int) bool {
+			db := dbLabels[index]
+			input = strings.ToLower(input)
+			return strings.Contains(strings.ToLower(db), input)
+		},
 	}
-	fmt.Print("\nSelect a database number: ")
-	sel, _ = reader.ReadString('\n')
-	sel = strings.TrimSpace(sel)
-	idx = 0
-	fmt.Sscanf(sel, "%d", &idx)
-	if idx <= 0 || idx > len(filteredDBs) {
-		log.Fatal("invalid selection")
+	idx, _, err = dbPrompt.Run()
+	if err != nil {
+		log.Fatalf("prompt failed: %v", err)
 	}
-	db := filteredDBs[idx-1]
+	db := dbOptions[idx]
 
-	clearScreen()
+	_ = writeLastSelection(&LastSelection{
+		Profile:    profile,
+		InstanceID: instance.ID,
+		DBEndpoint: db.Endpoint,
+		DBPort:     db.Port,
+	})
+
 	if err := startPortForward(profile, instance.ID, db.Endpoint, db.Port); err != nil {
 		log.Fatalf("port forwarding failed: %v", err)
 	}
