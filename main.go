@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -272,7 +273,56 @@ func writeLastSelection(sel *LastSelection) error {
 	return os.WriteFile(lastSelectionPath, data, 0600)
 }
 
+func quickConnect(profile, env string) error {
+	instances, err := fetchInstances(profile)
+	if err != nil {
+		return fmt.Errorf("fetch instances failed: %w", err)
+	}
+	var selectedInstance *Instance
+	for _, inst := range instances {
+		if strings.Contains(strings.ToLower(inst.Name), strings.ToLower(env)) {
+			selectedInstance = &inst
+			break
+		}
+	}
+	if selectedInstance == nil {
+		return fmt.Errorf("no instance matching environment '%s' found", env)
+	}
+
+	dbs, err := fetchDBs(profile)
+	if err != nil {
+		return fmt.Errorf("fetch dbs failed: %w", err)
+	}
+	var selectedDB *DB
+	for _, db := range dbs {
+		if db.VpcID == selectedInstance.VpcID && db.Role == "writer" {
+			selectedDB = &db
+			break
+		}
+	}
+	if selectedDB == nil {
+		return fmt.Errorf("no writer database found for selected instance")
+	}
+
+	fmt.Printf("✔ %s (%s)\n", selectedInstance.Name, selectedInstance.ID)
+	fmt.Printf("✔ %s:%s\n", selectedDB.Endpoint, selectedDB.Port)
+
+	_ = writeLastSelection(&LastSelection{
+		Profile:      profile,
+		InstanceName: selectedInstance.Name,
+		InstanceID:   selectedInstance.ID,
+		DBEndpoint:   selectedDB.Endpoint,
+		DBPort:       selectedDB.Port,
+	})
+
+	return startPortForward(profile, selectedInstance.Name, selectedInstance.ID, selectedDB.Endpoint, selectedDB.Port)
+}
+
 func main() {
+	profileFlag := flag.String("profile", "", "AWS profile name")
+	envFlag := flag.String("env", "", "Environment filter (e.g., prod, dev)")
+	flag.Parse()
+
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -283,6 +333,14 @@ func main() {
 		}
 		os.Exit(0)
 	}()
+
+	if *profileFlag != "" && *envFlag != "" {
+		err := quickConnect(*profileFlag, *envFlag)
+		if err != nil {
+			log.Fatalf("quick connect failed: %v", err)
+		}
+		return
+	}
 
 	if sel, err := readLastSelection(); err == nil {
 		fmt.Printf("Previous selection detected:\n☁️ Profile: %s\n🖥  Instance: %s (%s)\n🛢️ Database: %s:%s\n", sel.Profile, sel.InstanceName, sel.InstanceID, sel.DBEndpoint, sel.DBPort)
