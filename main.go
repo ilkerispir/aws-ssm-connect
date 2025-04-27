@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -238,6 +239,11 @@ func fetchDBs(profile string) ([]DB, error) {
 }
 
 func startPortForward(profile, instanceName, instanceID, host, port string) error {
+	if isPortInUse(port) {
+		fmt.Printf("❌ Local port %s is already in use. Please choose another port or close the existing connection.\n", port)
+		return fmt.Errorf("local port %s already in use", port)
+	}
+
 	fmt.Printf("\n✅ Starting port-forward from:\n💻 localhost:%s → 🖥  %s (%s) → 🛢️ %s:%s\n\n", port, instanceName, instanceID, host, port)
 	cmd := exec.Command(
 		"aws", "ssm", "start-session",
@@ -447,6 +453,15 @@ func processExists(pid int) bool {
 	// try sending signal 0 (does not actually kill)
 	err = process.Signal(syscall.Signal(0))
 	return err == nil
+}
+
+func isPortInUse(port string) bool {
+	ln, err := net.Listen("tcp", "127.0.0.1:"+port)
+	if err != nil {
+		return true // bind edemediysek port meşgul
+	}
+	_ = ln.Close()
+	return false
 }
 
 func showHelper() {
