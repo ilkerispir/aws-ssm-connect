@@ -229,7 +229,7 @@ func fetchDBs(profile string) ([]DB, error) {
 }
 
 func startPortForward(profile, instanceName, instanceID, host, port string) error {
-	fmt.Printf("\n✅ Starting port-forward from:\n%s (%s) → %s:%s → localhost:%s\n\n", instanceName, instanceID, host, port, port)
+	fmt.Printf("\n✅ Starting port-forward from:\nlocalhost:%s → 🖥  %s (%s) → 🛢️ %s:%s\n\n", port, instanceName, instanceID, host, port)
 	cmd := exec.Command(
 		"aws", "ssm", "start-session",
 		"--profile", profile,
