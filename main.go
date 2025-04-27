@@ -514,19 +514,32 @@ AWS SSM RDS Proxy - Quick Connect Tool
 Usage:
   aws-ssm-rds-proxy                                          # Interactive mode (prompts)
   aws-ssm-rds-proxy --profile <profile> --filter <keyword>   # Quick connect mode
+  aws-ssm-rds-proxy --list                                   # List active port-forward sessions
+  aws-ssm-rds-proxy --kill <pid>                             # Kill a specific port-forward session by PID
+  aws-ssm-rds-proxy --kill-all                               # Kill all active port-forward sessions
+  aws-ssm-rds-proxy --help                                   # Show this helper message
 
 Flags:
---profile  AWS profile name to use (e.g., my-aws-profile)
---filter   Keyword to match instance name (e.g., prod, dev, uat)
---help     Show this helper message
+--profile    AWS profile name to use (e.g., my-aws-profile)
+--filter     Keyword to match instance name (e.g., prod, dev, uat)
+--list       List active port-forward sessions
+--kill       Kill a specific session by PID
+--kill-all   Kill all active port-forward sessions
+--help       Show this helper message
 
-Example:
+Examples:
 aws-ssm-rds-proxy --profile my-aws-profile --filter dev
+aws-ssm-rds-proxy --list
+aws-ssm-rds-proxy --kill 12345
+aws-ssm-rds-proxy --kill-all
 
-This will:
-- Search for an instance with "dev" in its name
-- Find a writer database (or standalone RDS instance) in the same VPC
-- Start a port-forwarding session automatically
+Behavior:
+- Searches for an instance matching the filter keyword
+- Finds a writer database (or standalone RDS instance) in the same VPC
+- Starts a background port-forwarding session automatically
+- Manages sessions with PID tracking
+- Automatically cleans up dead sessions
+- Prevents port conflicts by checking local port availability
 `)
 }
 
