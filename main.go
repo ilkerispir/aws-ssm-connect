@@ -318,9 +318,33 @@ func quickConnect(profile, filter string) error {
 	return startPortForward(profile, selectedInstance.Name, selectedInstance.ID, selectedDB.Endpoint, selectedDB.Port)
 }
 
+func showHelper() {
+	fmt.Println(`
+AWS SSM RDS Proxy - Quick Connect Tool
+
+Usage:
+aws-ssm-rds-proxy                         								 # Interactive mode (prompts)
+aws-ssm-rds-proxy --profile <profile> --filter <keyword>   # Quick connect mode
+
+Flags:
+--profile  AWS profile name to use (e.g., my-aws-profile)
+--filter   Keyword to match instance name (e.g., prod, dev, uat)
+--help     Show this helper message
+
+Example:
+aws-ssm-rds-proxy --profile my-aws-profile --filter dev
+
+This will:
+- Search for an instance with "dev" in its name
+- Find a writer database (or standalone RDS instance) in the same VPC
+- Start a port-forwarding session automatically
+`)
+}
+
 func main() {
 	profileFlag := flag.String("profile", "", "AWS profile name")
 	filterFlag := flag.String("filter", "", "Instance name filter")
+	helpFlag := flag.Bool("help", false, "Show usage information")
 	flag.Parse()
 
 	c := make(chan os.Signal, 1)
@@ -333,6 +357,11 @@ func main() {
 		}
 		os.Exit(0)
 	}()
+
+	if *helpFlag {
+		showHelper()
+		return
+	}
 
 	if *profileFlag != "" && *filterFlag != "" {
 		err := quickConnect(*profileFlag, *filterFlag)
