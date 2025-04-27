@@ -1,13 +1,18 @@
-# aws-ssm-connect
+# aws-ssm-rds-proxy
 
-🖥️ **Tray**-based GUI for AWS SSM port-forwarding to EC2 instances & RDS (MySQL/Postgres).
+⚡ **CLI tool to port-forward to private RDS databases via EC2 instances using AWS SSM Session Manager.**
 
 ## Features
-- List AWS CLI profiles (SSO-aware)
-- Discover SSM-managed EC2 instances
-- Discover RDS endpoints (defaults 3306/5432)
-- One-click port-forward to localhost
+- Interactive profile/instance/database selection (SSO-aware)
+- Quick connect mode with `--profile` and `--filter`
+- Background port-forward sessions without blocking the terminal
+- PID tracking for active sessions
+- List active port-forward sessions with `--list`
+- Kill specific sessions with `--kill <pid>`
+- Kill all sessions at once with `--kill-all`
+- Automatic cleanup of dead sessions
+- Local port conflict detection before forwarding
 
 ## Installation
-```shell
-go install github.com/ilkerispir/aws-ssm-connect@latest
+```bash
+go install github.com/ilkerispir/aws-ssm-rds-proxy@latest
