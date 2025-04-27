@@ -43,9 +43,17 @@ type LastSelection struct {
 	DBPort       string `json:"db_port"`
 }
 
+type PIDInfo struct {
+	PID      int    `json:"pid"`
+	Profile  string `json:"profile"`
+	Instance string `json:"instance"`
+	DB       string `json:"db"`
+}
+
 var (
 	awsPid            int
 	lastSelectionPath = filepath.Join(os.Getenv("HOME"), ".aws-ssm-rds-proxy", "last-selections.json")
+	pidsFilePath      = filepath.Join(os.Getenv("HOME"), ".aws-ssm-rds-proxy", "pids.json")
 )
 
 func fetchProfiles() ([]string, error) {
@@ -238,15 +246,32 @@ func startPortForward(profile, instanceName, instanceID, host, port string) erro
 		"--document-name", "AWS-StartPortForwardingSessionToRemoteHost",
 		"--parameters", fmt.Sprintf("host=[\"%s\"],portNumber=[\"%s\"],localPortNumber=[\"%s\"]", host, port, port),
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
+
+	nullFile, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	cmd.Stdout = nullFile
+	cmd.Stderr = nullFile
+	cmd.Stdin = nullFile
+
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	awsPid = cmd.Process.Pid
-	return cmd.Wait()
+
+	// Save PID info
+	_ = savePID(PIDInfo{
+		PID:      awsPid,
+		Profile:  profile,
+		Instance: instanceName,
+		DB:       fmt.Sprintf("%s:%s", host, port),
+	})
+
+	fmt.Printf("🔵 Port-forward session started in background (PID %d).\n", awsPid)
+	return nil
 }
 
 func readLastSelection() (*LastSelection, error) {
@@ -318,6 +343,112 @@ func quickConnect(profile, filter string) error {
 	return startPortForward(profile, selectedInstance.Name, selectedInstance.ID, selectedDB.Endpoint, selectedDB.Port)
 }
 
+func savePID(info PIDInfo) error {
+	var existing []PIDInfo
+	data, err := os.ReadFile(pidsFilePath)
+	if err == nil {
+		_ = json.Unmarshal(data, &existing)
+	}
+
+	existing = append(existing, info)
+
+	out, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(pidsFilePath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(pidsFilePath, out, 0600)
+}
+
+func listPIDs() error {
+	data, err := os.ReadFile(pidsFilePath)
+	if err != nil {
+		return fmt.Errorf("could not read pids file: %w", err)
+	}
+	var pids []PIDInfo
+	if err := json.Unmarshal(data, &pids); err != nil {
+		return fmt.Errorf("could not parse pids file: %w", err)
+	}
+
+	var alive []PIDInfo
+	for _, p := range pids {
+		if processExists(p.PID) {
+			alive = append(alive, p)
+		}
+	}
+
+	// Update pids.json with only alive ones
+	out, _ := json.MarshalIndent(alive, "", "  ")
+	_ = os.WriteFile(pidsFilePath, out, 0600)
+
+	if len(alive) == 0 {
+		fmt.Println("No active port-forward sessions.")
+		return nil
+	}
+
+	fmt.Println("Active Port-Forward Sessions:")
+	for _, p := range alive {
+		fmt.Printf("🔵 PID: %d | Profile: %s | Instance: %s | DB: %s\n", p.PID, p.Profile, p.Instance, p.DB)
+	}
+	return nil
+}
+
+func killPID(pid int) error {
+	fmt.Printf("🛑 Attempting to kill PID %d...\n", pid)
+
+	// Kill the process
+	err := syscall.Kill(-pid, syscall.SIGKILL)
+	if err != nil {
+		if err.Error() == "no such process" || strings.Contains(err.Error(), "no such process") {
+			fmt.Printf("⚠️  PID %d is already dead. Cleaning up...\n", pid)
+		} else {
+			return fmt.Errorf("failed to kill pid %d: %w", pid, err)
+		}
+	}
+
+	// Remove from pids.json
+	data, err := os.ReadFile(pidsFilePath)
+	if err != nil {
+		return fmt.Errorf("could not read pids file: %w", err)
+	}
+	var pids []PIDInfo
+	if err := json.Unmarshal(data, &pids); err != nil {
+		return fmt.Errorf("could not parse pids file: %w", err)
+	}
+
+	var updated []PIDInfo
+	for _, p := range pids {
+		if p.PID != pid {
+			updated = append(updated, p)
+		}
+	}
+
+	out, err := json.MarshalIndent(updated, "", "  ")
+	if err != nil {
+		return fmt.Errorf("could not re-encode pids: %w", err)
+	}
+
+	if err := os.WriteFile(pidsFilePath, out, 0600); err != nil {
+		return fmt.Errorf("could not write updated pids: %w", err)
+	}
+
+	fmt.Println("✅ PID", pid, "successfully cleaned up from session list.")
+	return nil
+}
+
+func processExists(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// try sending signal 0 (does not actually kill)
+	err = process.Signal(syscall.Signal(0))
+	return err == nil
+}
+
 func showHelper() {
 	fmt.Println(`
 AWS SSM RDS Proxy - Quick Connect Tool
@@ -344,6 +475,8 @@ This will:
 func main() {
 	profileFlag := flag.String("profile", "", "AWS profile name")
 	filterFlag := flag.String("filter", "", "Instance name filter")
+	listFlag := flag.Bool("list", false, "List active port-forward sessions")
+	killFlag := flag.Int("kill", 0, "Kill a port-forward session by PID")
 	helpFlag := flag.Bool("help", false, "Show usage information")
 	flag.Parse()
 
@@ -360,6 +493,20 @@ func main() {
 
 	if *helpFlag {
 		showHelper()
+		return
+	}
+
+	if *listFlag {
+		if err := listPIDs(); err != nil {
+			log.Fatalf("list pids failed: %v", err)
+		}
+		return
+	}
+
+	if *killFlag != 0 {
+		if err := killPID(*killFlag); err != nil {
+			log.Fatalf("kill pid failed: %v", err)
+		}
 		return
 	}
 
