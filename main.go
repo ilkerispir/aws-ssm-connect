@@ -445,6 +445,49 @@ func killPID(pid int) error {
 	return nil
 }
 
+func killAllPIDs() error {
+	fmt.Println("🛑 Attempting to kill all active port-forward sessions...")
+
+	data, err := os.ReadFile(pidsFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No active sessions to kill.")
+			return nil
+		}
+		return fmt.Errorf("could not read pids file: %w", err)
+	}
+
+	var pids []PIDInfo
+	if err := json.Unmarshal(data, &pids); err != nil {
+		return fmt.Errorf("could not parse pids file: %w", err)
+	}
+
+	killedCount := 0
+	for _, p := range pids {
+		if err := syscall.Kill(-p.PID, syscall.SIGKILL); err != nil {
+			if strings.Contains(err.Error(), "no such process") {
+				fmt.Printf("⚠️  PID %d already dead, skipping...\n", p.PID)
+			} else {
+				fmt.Printf("❌ Failed to kill PID %d: %v\n", p.PID, err)
+			}
+		} else {
+			fmt.Printf("✅ Killed PID %d\n", p.PID)
+			killedCount++
+		}
+	}
+
+	// After killing, clean up pids.json
+	_ = os.Remove(pidsFilePath)
+
+	if killedCount == 0 {
+		fmt.Println("ℹ️  No alive sessions were found.")
+	} else {
+		fmt.Printf("🔵 Successfully killed %d sessions.\n", killedCount)
+	}
+
+	return nil
+}
+
 func processExists(pid int) bool {
 	process, err := os.FindProcess(pid)
 	if err != nil {
@@ -492,6 +535,7 @@ func main() {
 	filterFlag := flag.String("filter", "", "Instance name filter")
 	listFlag := flag.Bool("list", false, "List active port-forward sessions")
 	killFlag := flag.Int("kill", 0, "Kill a port-forward session by PID")
+	killAllFlag := flag.Bool("kill-all", false, "Kill all active port-forward sessions")
 	helpFlag := flag.Bool("help", false, "Show usage information")
 	flag.Parse()
 
@@ -521,6 +565,13 @@ func main() {
 	if *killFlag != 0 {
 		if err := killPID(*killFlag); err != nil {
 			log.Fatalf("kill pid failed: %v", err)
+		}
+		return
+	}
+
+	if *killAllFlag {
+		if err := killAllPIDs(); err != nil {
+			log.Fatalf("kill all pids failed: %v", err)
 		}
 		return
 	}
