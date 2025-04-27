@@ -323,8 +323,8 @@ func showHelper() {
 AWS SSM RDS Proxy - Quick Connect Tool
 
 Usage:
-aws-ssm-rds-proxy                         								 # Interactive mode (prompts)
-aws-ssm-rds-proxy --profile <profile> --filter <keyword>   # Quick connect mode
+  aws-ssm-rds-proxy                                          # Interactive mode (prompts)
+  aws-ssm-rds-proxy --profile <profile> --filter <keyword>   # Quick connect mode
 
 Flags:
 --profile  AWS profile name to use (e.g., my-aws-profile)
