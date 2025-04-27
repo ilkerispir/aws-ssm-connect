@@ -35,10 +35,11 @@ type DB struct {
 }
 
 type LastSelection struct {
-	Profile    string `json:"profile"`
-	InstanceID string `json:"instance_id"`
-	DBEndpoint string `json:"db_endpoint"`
-	DBPort     string `json:"db_port"`
+	Profile      string `json:"profile"`
+	InstanceName string `json:"instance_name"`
+	InstanceID   string `json:"instance_id"`
+	DBEndpoint   string `json:"db_endpoint"`
+	DBPort       string `json:"db_port"`
 }
 
 var (
@@ -227,8 +228,8 @@ func fetchDBs(profile string) ([]DB, error) {
 	return dbs, nil
 }
 
-func startPortForward(profile, instanceID, host, port string) error {
-	fmt.Printf("\n✅ Starting port-forward from:\n%s → %s:%s → localhost:%s\n\n", instanceID, host, port, port)
+func startPortForward(profile, instanceName, instanceID, host, port string) error {
+	fmt.Printf("\n✅ Starting port-forward from:\n%s (%s) → %s:%s → localhost:%s\n\n", instanceName, instanceID, host, port, port)
 	cmd := exec.Command(
 		"aws", "ssm", "start-session",
 		"--profile", profile,
@@ -284,14 +285,14 @@ func main() {
 	}()
 
 	if sel, err := readLastSelection(); err == nil {
-		fmt.Printf("Previous selection detected:\n☁️ Profile: %s\n🖥  Instance: %s\n🛢️ Database: %s:%s\n", sel.Profile, sel.InstanceID, sel.DBEndpoint, sel.DBPort)
+		fmt.Printf("Previous selection detected:\n☁️ Profile: %s\n🖥  Instance: %s (%s)\n🛢️ Database: %s:%s\n", sel.Profile, sel.InstanceName, sel.InstanceID, sel.DBEndpoint, sel.DBPort)
 		prompt := promptui.Prompt{
 			Label:     "Do you want to reuse it? (y/N)",
 			IsConfirm: true,
 		}
 		result, _ := prompt.Run()
 		if strings.ToLower(result) == "y" {
-			if err := startPortForward(sel.Profile, sel.InstanceID, sel.DBEndpoint, sel.DBPort); err != nil {
+			if err := startPortForward(sel.Profile, sel.InstanceName, sel.InstanceID, sel.DBEndpoint, sel.DBPort); err != nil {
 				log.Fatalf("port forwarding failed: %v", err)
 			}
 			return
@@ -372,13 +373,14 @@ func main() {
 	db := dbOptions[idx]
 
 	_ = writeLastSelection(&LastSelection{
-		Profile:    profile,
-		InstanceID: instance.ID,
-		DBEndpoint: db.Endpoint,
-		DBPort:     db.Port,
+		Profile:      profile,
+		InstanceName: instance.Name,
+		InstanceID:   instance.ID,
+		DBEndpoint:   db.Endpoint,
+		DBPort:       db.Port,
 	})
 
-	if err := startPortForward(profile, instance.ID, db.Endpoint, db.Port); err != nil {
+	if err := startPortForward(profile, instance.Name, instance.ID, db.Endpoint, db.Port); err != nil {
 		log.Fatalf("port forwarding failed: %v", err)
 	}
 }
