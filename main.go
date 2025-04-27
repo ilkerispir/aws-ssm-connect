@@ -31,6 +31,7 @@ type DB struct {
 	Endpoint string
 	Port     string
 	VpcID    string
+	Role     string
 }
 
 type LastSelection struct {
@@ -128,50 +129,101 @@ func fetchInstances(profile string) ([]Instance, error) {
 	return result, nil
 }
 
+func formatDBLabel(db DB) string {
+	var prefix string
+	switch db.Role {
+	case "writer":
+		prefix = " ✍️  [Writer] "
+	case "reader":
+		prefix = " 📖 [Reader] "
+	default:
+		prefix = ""
+	}
+	return fmt.Sprintf("🛢️ %s%s:%s", prefix, db.Endpoint, db.Port)
+}
+
+func detectPort(engine string) string {
+	eng := strings.ToLower(engine)
+	switch {
+	case strings.Contains(eng, "mysql"), strings.Contains(eng, "mariadb"), strings.Contains(eng, "aurora-mysql"):
+		return "3306"
+	case strings.Contains(eng, "postgres"), strings.Contains(eng, "aurora-postgresql"):
+		return "5432"
+	case strings.Contains(eng, "sqlserver"):
+		return "1433"
+	default:
+		return "3306"
+	}
+}
+
 func fetchDBs(profile string) ([]DB, error) {
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile))
 	if err != nil {
 		return nil, err
 	}
+
 	rdsClient := rds.NewFromConfig(cfg)
-	out, err := rdsClient.DescribeDBInstances(context.TODO(), &rds.DescribeDBInstancesInput{})
+	var dbs []DB
+
+	// Fetch clusters
+	clustersOut, err := rdsClient.DescribeDBClusters(context.TODO(), &rds.DescribeDBClustersInput{})
 	if err != nil {
-		if strings.Contains(err.Error(), "InvalidGrantException") || strings.Contains(err.Error(), "token expired") {
-			if loginErr := ensureSSOLogin(profile); loginErr != nil {
-				return nil, fmt.Errorf("SSO login failed: %v", loginErr)
+		return nil, err
+	}
+
+	// Fetch subnet groups
+	subnetGroupsOut, err := rdsClient.DescribeDBSubnetGroups(context.TODO(), &rds.DescribeDBSubnetGroupsInput{})
+	if err != nil {
+		return nil, err
+	}
+	subnetToVpc := make(map[string]string)
+	for _, sg := range subnetGroupsOut.DBSubnetGroups {
+		subnetToVpc[*sg.DBSubnetGroupName] = *sg.VpcId
+	}
+
+	for _, cluster := range clustersOut.DBClusters {
+		eng := strings.ToLower(*cluster.Engine)
+		if strings.Contains(eng, "aurora") {
+			vpcId := ""
+			if cluster.DBSubnetGroup != nil {
+				if v, ok := subnetToVpc[*cluster.DBSubnetGroup]; ok {
+					vpcId = v
+				}
 			}
-			cfg, _ = config.LoadDefaultConfig(context.TODO(), config.WithSharedConfigProfile(profile))
-			rdsClient = rds.NewFromConfig(cfg)
-			out, err = rdsClient.DescribeDBInstances(context.TODO(), &rds.DescribeDBInstancesInput{})
-			if err != nil {
-				return nil, err
+			port := detectPort(*cluster.Engine)
+			if cluster.Endpoint != nil {
+				dbs = append(dbs, DB{Endpoint: *cluster.Endpoint, Port: port, VpcID: vpcId, Role: "writer"})
 			}
-		} else {
-			return nil, err
+			if cluster.ReaderEndpoint != nil {
+				dbs = append(dbs, DB{Endpoint: *cluster.ReaderEndpoint, Port: port, VpcID: vpcId, Role: "reader"})
+			}
 		}
 	}
-	var dbs []DB
-	for _, inst := range out.DBInstances {
+
+	// Fetch standalone instances
+	instancesOut, err := rdsClient.DescribeDBInstances(context.TODO(), &rds.DescribeDBInstancesInput{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, inst := range instancesOut.DBInstances {
+		// Skip reader replicas and Aurora cluster members
+		if inst.ReadReplicaSourceDBInstanceIdentifier != nil || inst.DBClusterIdentifier != nil {
+			continue
+		}
 		ep := *inst.Endpoint.Address
 		port := fmt.Sprint(*inst.Endpoint.Port)
-		eng := strings.ToLower(*inst.Engine)
-		switch {
-		case strings.Contains(eng, "mysql"), strings.Contains(eng, "mariadb"), strings.Contains(eng, "aurora-mysql"):
-			port = "3306"
-		case strings.Contains(eng, "postgres"), strings.Contains(eng, "aurora-postgresql"):
-			port = "5432"
-		case strings.Contains(eng, "sqlserver"):
-			port = "1433"
-		}
 		vpc := ""
 		if inst.DBSubnetGroup != nil && inst.DBSubnetGroup.VpcId != nil {
 			vpc = *inst.DBSubnetGroup.VpcId
 		}
-		dbs = append(dbs, DB{Endpoint: ep, Port: port, VpcID: vpc})
+		dbs = append(dbs, DB{Endpoint: ep, Port: port, VpcID: vpc, Role: "instance"})
 	}
+
 	sort.Slice(dbs, func(i, j int) bool {
 		return dbs[i].Endpoint < dbs[j].Endpoint
 	})
+
 	return dbs, nil
 }
 
@@ -297,7 +349,7 @@ func main() {
 	for _, db := range dbs {
 		if db.VpcID == instance.VpcID {
 			dbOptions = append(dbOptions, db)
-			dbLabels = append(dbLabels, fmt.Sprintf("🛢️ %s:%s", db.Endpoint, db.Port))
+			dbLabels = append(dbLabels, formatDBLabel(db))
 		}
 	}
 	if len(dbOptions) == 0 {
