@@ -186,7 +186,7 @@ func main() {
 		log.Fatalf("load profiles failed: %v", err)
 	}
 	for i, p := range profiles {
-		fmt.Printf("[%2d] %s\n", i+1, p)
+		fmt.Printf("[%2d] ☁️  %s\n", i+1, p)
 	}
 	fmt.Print("\nSelect a profile number: ")
 	sel, _ := reader.ReadString('\n')
