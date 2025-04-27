@@ -273,20 +273,20 @@ func writeLastSelection(sel *LastSelection) error {
 	return os.WriteFile(lastSelectionPath, data, 0600)
 }
 
-func quickConnect(profile, env string) error {
+func quickConnect(profile, filter string) error {
 	instances, err := fetchInstances(profile)
 	if err != nil {
 		return fmt.Errorf("fetch instances failed: %w", err)
 	}
 	var selectedInstance *Instance
 	for _, inst := range instances {
-		if strings.Contains(strings.ToLower(inst.Name), strings.ToLower(env)) {
+		if strings.Contains(strings.ToLower(inst.Name), strings.ToLower(filter)) {
 			selectedInstance = &inst
 			break
 		}
 	}
 	if selectedInstance == nil {
-		return fmt.Errorf("no instance matching environment '%s' found", env)
+		return fmt.Errorf("no instance matching environment '%s' found", filter)
 	}
 
 	dbs, err := fetchDBs(profile)
@@ -320,7 +320,7 @@ func quickConnect(profile, env string) error {
 
 func main() {
 	profileFlag := flag.String("profile", "", "AWS profile name")
-	envFlag := flag.String("env", "", "Environment filter (e.g., prod, dev)")
+	filterFlag := flag.String("filter", "", "Instance name filter")
 	flag.Parse()
 
 	c := make(chan os.Signal, 1)
@@ -334,8 +334,8 @@ func main() {
 		os.Exit(0)
 	}()
 
-	if *profileFlag != "" && *envFlag != "" {
-		err := quickConnect(*profileFlag, *envFlag)
+	if *profileFlag != "" && *filterFlag != "" {
+		err := quickConnect(*profileFlag, *filterFlag)
 		if err != nil {
 			log.Fatalf("quick connect failed: %v", err)
 		}
