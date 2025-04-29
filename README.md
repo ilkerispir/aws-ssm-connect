@@ -1,4 +1,4 @@
-# aws-ssm-rds-proxy
+# aws-ssm-tunnel
 
 ⚡ **CLI tool to port-forward to private RDS databases via EC2 instances using AWS SSM Session Manager.**
 
@@ -15,4 +15,4 @@
 
 ## Installation
 ```bash
-go install github.com/ilkerispir/aws-ssm-rds-proxy@latest
+go install github.com/ilkerispir/aws-ssm-tunnel@latest
