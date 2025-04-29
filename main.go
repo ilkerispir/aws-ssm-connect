@@ -53,8 +53,8 @@ type PIDInfo struct {
 
 var (
 	awsPid            int
-	lastSelectionPath = filepath.Join(os.Getenv("HOME"), ".aws-ssm-rds-proxy", "last-selections.json")
-	pidsFilePath      = filepath.Join(os.Getenv("HOME"), ".aws-ssm-rds-proxy", "pids.json")
+	lastSelectionPath = filepath.Join(os.Getenv("HOME"), ".aws-ssm-tunnel", "last-selections.json")
+	pidsFilePath      = filepath.Join(os.Getenv("HOME"), ".aws-ssm-tunnel", "pids.json")
 )
 
 func fetchProfiles() ([]string, error) {
@@ -516,12 +516,12 @@ func showHelper() {
 AWS SSM RDS Proxy - Quick Connect Tool
 
 Usage:
-  aws-ssm-rds-proxy                                          # Interactive mode (prompts)
-  aws-ssm-rds-proxy --profile <profile> --filter <keyword>   # Quick connect mode
-  aws-ssm-rds-proxy --list                                   # List active port-forward sessions
-  aws-ssm-rds-proxy --kill <pid>                             # Kill a specific port-forward session by PID
-  aws-ssm-rds-proxy --kill-all                               # Kill all active port-forward sessions
-  aws-ssm-rds-proxy --help                                   # Show this helper message
+  aws-ssm-tunnel                                          # Interactive mode (prompts)
+  aws-ssm-tunnel --profile <profile> --filter <keyword>   # Quick connect mode
+  aws-ssm-tunnel --list                                   # List active port-forward sessions
+  aws-ssm-tunnel --kill <pid>                             # Kill a specific port-forward session by PID
+  aws-ssm-tunnel --kill-all                               # Kill all active port-forward sessions
+  aws-ssm-tunnel --help                                   # Show this helper message
 
 Flags:
 --profile    AWS profile name to use (e.g., my-aws-profile)
@@ -532,10 +532,10 @@ Flags:
 --help       Show this helper message
 
 Examples:
-aws-ssm-rds-proxy --profile my-aws-profile --filter dev
-aws-ssm-rds-proxy --list
-aws-ssm-rds-proxy --kill 12345
-aws-ssm-rds-proxy --kill-all
+aws-ssm-tunnel --profile my-aws-profile --filter dev
+aws-ssm-tunnel --list
+aws-ssm-tunnel --kill 12345
+aws-ssm-tunnel --kill-all
 
 Behavior:
 - Searches for an instance matching the filter keyword
