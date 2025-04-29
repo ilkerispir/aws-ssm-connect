@@ -94,7 +94,11 @@ func fetchInstances(profile string) ([]Instance, error) {
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(context.TODO())
 		if err != nil {
-			if strings.Contains(err.Error(), "InvalidGrantException") || strings.Contains(err.Error(), "token expired") {
+			if strings.Contains(err.Error(), "InvalidGrantException") ||
+				strings.Contains(err.Error(), "token expired") ||
+				strings.Contains(err.Error(), "failed to read cached SSO token file") ||
+				strings.Contains(err.Error(), "failed to refresh cached credentials") {
+
 				if loginErr := ensureSSOLogin(profile); loginErr != nil {
 					return nil, fmt.Errorf("SSO login failed: %v", loginErr)
 				}
