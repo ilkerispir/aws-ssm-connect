@@ -75,12 +75,18 @@ func fetchProfiles() ([]string, error) {
 }
 
 func ensureSSOLogin(profile string) error {
+	cmd := exec.Command("aws", "sts", "get-caller-identity", "--profile", profile)
+	if err := cmd.Run(); err == nil {
+		// token is valid, no need to login
+		return nil
+	}
+
 	fmt.Printf("⚡ Attempting SSO login for profile '%s'...\n", profile)
-	cmd := exec.Command("aws", "sso", "login", "--profile", profile)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	return cmd.Run()
+	loginCmd := exec.Command("aws", "sso", "login", "--profile", profile)
+	loginCmd.Stdout = os.Stdout
+	loginCmd.Stderr = os.Stderr
+	loginCmd.Stdin = os.Stdin
+	return loginCmd.Run()
 }
 
 func fetchInstances(profile string) ([]Instance, error) {
@@ -609,11 +615,15 @@ func main() {
 		}
 		result, _ := prompt.Run()
 		if strings.ToLower(result) == "y" {
+			if err := ensureSSOLogin(sel.Profile); err != nil {
+				log.Fatalf("SSO login failed: %v", err)
+			}
 			if err := startPortForward(sel.Profile, sel.InstanceName, sel.InstanceID, sel.DBEndpoint, sel.DBPort); err != nil {
 				log.Fatalf("port forwarding failed: %v", err)
 			}
 			return
 		}
+
 	}
 
 	profiles, err := fetchProfiles()
