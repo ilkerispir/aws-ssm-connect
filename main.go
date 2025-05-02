@@ -248,19 +248,19 @@ func fetchDBs(profile string) ([]DB, error) {
 	return dbs, nil
 }
 
-func startPortForward(profile, instanceName, instanceID, host, port string) error {
-	if isPortInUse(port) {
-		fmt.Printf("❌ Local port %s is already in use. Please choose another port or close the existing connection.\n", port)
-		return fmt.Errorf("local port %s already in use", port)
+func startPortForward(profile, instanceName, instanceID, host, remotePort, localPort string) error {
+	if isPortInUse(localPort) {
+		fmt.Printf("❌ Local port %s is already in use. Please choose another port or close the existing connection.\n", localPort)
+		return fmt.Errorf("local port %s already in use", localPort)
 	}
 
-	fmt.Printf("\n✅ Starting port-forward from:\n💻 localhost:%s → 🖥  %s (%s) → 🛢️ %s:%s\n\n", port, instanceName, instanceID, host, port)
+	fmt.Printf("\n✅ Starting port-forward from:\n💻 localhost:%s → 🛢️  %s (%s) → 📂 %s:%s\n\n", localPort, instanceName, instanceID, host, remotePort)
 	cmd := exec.Command(
 		"aws", "ssm", "start-session",
 		"--profile", profile,
 		"--target", instanceID,
 		"--document-name", "AWS-StartPortForwardingSessionToRemoteHost",
-		"--parameters", fmt.Sprintf("host=[\"%s\"],portNumber=[\"%s\"],localPortNumber=[\"%s\"]", host, port, port),
+		"--parameters", fmt.Sprintf("host=[\"%s\"],portNumber=[\"%s\"],localPortNumber=[\"%s\"]", host, remotePort, localPort),
 	)
 
 	nullFile, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
@@ -270,22 +270,13 @@ func startPortForward(profile, instanceName, instanceID, host, port string) erro
 	cmd.Stdout = nullFile
 	cmd.Stderr = nullFile
 	cmd.Stdin = nullFile
-
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	awsPid = cmd.Process.Pid
-
-	// Save PID info
-	_ = savePID(PIDInfo{
-		PID:      awsPid,
-		Profile:  profile,
-		Instance: instanceName,
-		DB:       fmt.Sprintf("%s:%s", host, port),
-	})
-
+	_ = savePID(PIDInfo{PID: awsPid, Profile: profile, Instance: instanceName, DB: fmt.Sprintf("%s:%s", host, localPort)})
 	fmt.Printf("🔵 Port-forward session started in background (PID %d).\n", awsPid)
 	return nil
 }
@@ -314,7 +305,7 @@ func writeLastSelection(sel *LastSelection) error {
 	return os.WriteFile(lastSelectionPath, data, 0600)
 }
 
-func quickConnect(profile, filter string) error {
+func quickConnect(profile, filter, overridePort string) error {
 	instances, err := fetchInstances(profile)
 	if err != nil {
 		return fmt.Errorf("fetch instances failed: %w", err)
@@ -329,7 +320,6 @@ func quickConnect(profile, filter string) error {
 	if selectedInstance == nil {
 		return fmt.Errorf("no instance matching environment '%s' found", filter)
 	}
-
 	dbs, err := fetchDBs(profile)
 	if err != nil {
 		return fmt.Errorf("fetch dbs failed: %w", err)
@@ -345,6 +335,11 @@ func quickConnect(profile, filter string) error {
 		return fmt.Errorf("no writer database found for selected instance")
 	}
 
+	localPort := selectedDB.Port
+	if overridePort != "" {
+		localPort = overridePort
+	}
+
 	fmt.Printf("✔ %s (%s)\n", selectedInstance.Name, selectedInstance.ID)
 	fmt.Printf("✔ %s:%s\n", selectedDB.Endpoint, selectedDB.Port)
 
@@ -356,7 +351,7 @@ func quickConnect(profile, filter string) error {
 		DBPort:       selectedDB.Port,
 	})
 
-	return startPortForward(profile, selectedInstance.Name, selectedInstance.ID, selectedDB.Endpoint, selectedDB.Port)
+	return startPortForward(profile, selectedInstance.Name, selectedInstance.ID, selectedDB.Endpoint, selectedDB.Port, localPort)
 }
 
 func savePID(info PIDInfo) error {
@@ -556,6 +551,7 @@ Behavior:
 func main() {
 	profileFlag := flag.String("profile", "", "AWS profile name")
 	filterFlag := flag.String("filter", "", "Instance name filter")
+	portFlag := flag.Int("port", 0, "Local port to bind (optional)")
 	listFlag := flag.Bool("list", false, "List active port-forward sessions")
 	killFlag := flag.Int("kill", 0, "Kill a port-forward session by PID")
 	killAllFlag := flag.Bool("kill-all", false, "Kill all active port-forward sessions")
@@ -599,8 +595,16 @@ func main() {
 		return
 	}
 
+	if *portFlag < 0 || *portFlag > 65535 {
+		log.Fatalf("invalid port: %d. Must be between 1 and 65535", *portFlag)
+	}
+
 	if *profileFlag != "" && *filterFlag != "" {
-		err := quickConnect(*profileFlag, *filterFlag)
+		overridePort := ""
+		if *portFlag != 0 {
+			overridePort = fmt.Sprint(*portFlag)
+		}
+		err := quickConnect(*profileFlag, *filterFlag, overridePort)
 		if err != nil {
 			log.Fatalf("quick connect failed: %v", err)
 		}
@@ -618,12 +622,15 @@ func main() {
 			if err := ensureSSOLogin(sel.Profile); err != nil {
 				log.Fatalf("SSO login failed: %v", err)
 			}
-			if err := startPortForward(sel.Profile, sel.InstanceName, sel.InstanceID, sel.DBEndpoint, sel.DBPort); err != nil {
+			localPort := sel.DBPort
+			if *portFlag != 0 {
+				localPort = fmt.Sprint(*portFlag)
+			}
+			if err := startPortForward(sel.Profile, sel.InstanceName, sel.InstanceID, sel.DBEndpoint, sel.DBPort, localPort); err != nil {
 				log.Fatalf("port forwarding failed: %v", err)
 			}
 			return
 		}
-
 	}
 
 	profiles, err := fetchProfiles()
@@ -699,6 +706,11 @@ func main() {
 	}
 	db := dbOptions[idx]
 
+	localPort := db.Port
+	if *portFlag != 0 {
+		localPort = fmt.Sprint(*portFlag)
+	}
+
 	_ = writeLastSelection(&LastSelection{
 		Profile:      profile,
 		InstanceName: instance.Name,
@@ -707,7 +719,7 @@ func main() {
 		DBPort:       db.Port,
 	})
 
-	if err := startPortForward(profile, instance.Name, instance.ID, db.Endpoint, db.Port); err != nil {
+	if err := startPortForward(profile, instance.Name, instance.ID, db.Endpoint, db.Port, localPort); err != nil {
 		log.Fatalf("port forwarding failed: %v", err)
 	}
 }
