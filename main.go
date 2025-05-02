@@ -15,8 +15,10 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/elasticache"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/manifoldco/promptui"
@@ -157,8 +159,24 @@ func formatDBLabel(db DB) string {
 		prefix = "✍️ [Writer] "
 	case "reader":
 		prefix = "📖 [Reader] "
+	case "primary":
+		prefix = "📕 [Primary] "
+	case "replica":
+		prefix = "📘 [Replica] "
 	default:
-		prefix = ""
+		if strings.HasPrefix(db.Role, "redis") {
+			if strings.Contains(db.Role, "primary") {
+				prefix = "📕 [Redis Primary] "
+			} else {
+				prefix = "📘 [Redis Replica] "
+			}
+		} else if strings.HasPrefix(db.Role, "memcached") {
+			prefix = "📗 [Memcached] "
+		} else if strings.HasPrefix(db.Role, "valkey") {
+			prefix = "📙 [Valkey] "
+		} else {
+			prefix = ""
+		}
 	}
 	return fmt.Sprintf("🛢️ %s%s:%s", prefix, db.Endpoint, db.Port)
 }
@@ -184,9 +202,10 @@ func fetchDBs(profile string) ([]DB, error) {
 	}
 
 	rdsClient := rds.NewFromConfig(cfg)
+	cacheClient := elasticache.NewFromConfig(cfg)
 	var dbs []DB
 
-	// Fetch clusters
+	// --- RDS Section ---
 	clustersOut, err := rdsClient.DescribeDBClusters(context.TODO(), &rds.DescribeDBClustersInput{})
 	if err != nil {
 		return nil, err
@@ -239,6 +258,90 @@ func fetchDBs(profile string) ([]DB, error) {
 			vpc = *inst.DBSubnetGroup.VpcId
 		}
 		dbs = append(dbs, DB{Endpoint: ep, Port: port, VpcID: vpc, Role: "instance"})
+	}
+
+	// --- Elasticache Section ---
+	subnetGroupsOut2, err := cacheClient.DescribeCacheSubnetGroups(context.TODO(), &elasticache.DescribeCacheSubnetGroupsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("DescribeCacheSubnetGroups failed: %w", err)
+	}
+	subnetGroupVpcMap := make(map[string]string)
+	for _, sg := range subnetGroupsOut2.CacheSubnetGroups {
+		if sg.CacheSubnetGroupName != nil && sg.VpcId != nil {
+			subnetGroupVpcMap[*sg.CacheSubnetGroupName] = *sg.VpcId
+		}
+	}
+
+	// DescribeCacheClusters to map cluster ID to VPC ID
+	clusterIdToVpc := make(map[string]string)
+	cacheClustersOut, err := cacheClient.DescribeCacheClusters(context.TODO(), &elasticache.DescribeCacheClustersInput{
+		ShowCacheNodeInfo: aws.Bool(true),
+	})
+	if err == nil {
+		for _, cc := range cacheClustersOut.CacheClusters {
+			if cc.CacheClusterId != nil && cc.CacheSubnetGroupName != nil {
+				if v, ok := subnetGroupVpcMap[*cc.CacheSubnetGroupName]; ok {
+					clusterIdToVpc[*cc.CacheClusterId] = v
+				}
+			}
+		}
+	}
+
+	replGroupsOut, err := cacheClient.DescribeReplicationGroups(context.TODO(), &elasticache.DescribeReplicationGroupsInput{})
+	if err != nil {
+		return dbs, nil // return existing dbs even if Elasticache fails
+	}
+
+	seenRedisClusters := make(map[string]bool)
+	for _, rg := range replGroupsOut.ReplicationGroups {
+		engine := strings.ToLower(*rg.Engine)
+		if engine != "redis" && engine != "valkey" {
+			continue
+		}
+		port := "6379"
+		vpcId := ""
+		if len(rg.MemberClusters) > 0 {
+			clusterId := rg.MemberClusters[0]
+			if v, ok := clusterIdToVpc[clusterId]; ok {
+				vpcId = v
+			}
+		}
+
+		if rg.ConfigurationEndpoint != nil && rg.ConfigurationEndpoint.Address != nil {
+			addr := *rg.ConfigurationEndpoint.Address
+			if addr != "" && !seenRedisClusters[addr] {
+				seenRedisClusters[addr] = true
+				dbs = append(dbs, DB{
+					Endpoint: addr,
+					Port:     port,
+					VpcID:    vpcId,
+					Role:     fmt.Sprintf("%s-primary", engine),
+				})
+				continue
+			}
+		}
+
+		for _, ng := range rg.NodeGroups {
+			for _, ep := range ng.NodeGroupMembers {
+				if ep.ReadEndpoint == nil || ep.ReadEndpoint.Address == nil {
+					continue
+				}
+				addr := *ep.ReadEndpoint.Address
+				role := "replica"
+				if ep.CurrentRole != nil && *ep.CurrentRole == "primary" {
+					role = "primary"
+				}
+				if addr != "" && !seenRedisClusters[addr] {
+					seenRedisClusters[addr] = true
+					dbs = append(dbs, DB{
+						Endpoint: addr,
+						Port:     port,
+						VpcID:    vpcId,
+						Role:     fmt.Sprintf("%s-%s", engine, role),
+					})
+				}
+			}
+		}
 	}
 
 	sort.Slice(dbs, func(i, j int) bool {
