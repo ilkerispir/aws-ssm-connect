@@ -57,6 +57,7 @@ var (
 	awsPid            int
 	lastSelectionPath = filepath.Join(os.Getenv("HOME"), ".aws-ssm-tunnel", "last-selections.json")
 	pidsFilePath      = filepath.Join(os.Getenv("HOME"), ".aws-ssm-tunnel", "pids.json")
+	version           = "dev"
 )
 
 func fetchProfiles() ([]string, error) {
@@ -626,6 +627,7 @@ Usage:
   aws-ssm-tunnel --kill <pid>                             # Kill a specific port-forward session by PID
   aws-ssm-tunnel --kill-all                               # Kill all active port-forward sessions
   aws-ssm-tunnel --help                                   # Show this helper message
+  aws-ssm-tunnel --version                                # Show version
 
 Flags:
 --profile    AWS profile name to use (e.g., my-aws-profile)
@@ -634,6 +636,7 @@ Flags:
 --kill       Kill a specific session by PID
 --kill-all   Kill all active port-forward sessions
 --help       Show this helper message
+--version    Show version
 
 Examples:
 aws-ssm-tunnel --profile my-aws-profile --filter dev
@@ -659,6 +662,7 @@ func main() {
 	killFlag := flag.Int("kill", 0, "Kill a port-forward session by PID")
 	killAllFlag := flag.Bool("kill-all", false, "Kill all active port-forward sessions")
 	helpFlag := flag.Bool("help", false, "Show usage information")
+	versionFlag := flag.Bool("version", false, "Show version")
 	flag.Parse()
 
 	c := make(chan os.Signal, 1)
@@ -675,6 +679,11 @@ func main() {
 	if *helpFlag {
 		showHelper()
 		return
+	}
+
+	if *versionFlag {
+		fmt.Println("aws-ssm-tunnel version:", version)
+		os.Exit(0)
 	}
 
 	if *listFlag {

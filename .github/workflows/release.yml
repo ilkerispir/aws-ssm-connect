@@ -31,7 +31,9 @@ jobs:
           mkdir -p dist
           BIN_NAME=aws-ssm-tunnel
           OUT_NAME=aws-ssm-tunnel-${GOOS}-${GOARCH}
-          GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=0 go build -o dist/${BIN_NAME}
+          VERSION=${GITHUB_REF##*/}  # Extracts the tag name like 'v0.0.4'
+          GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=0 \
+          go build -ldflags "-X main.version=$VERSION" -o dist/${BIN_NAME}
           tar -czf dist/${OUT_NAME}.tar.gz -C dist ${BIN_NAME}
           rm dist/${BIN_NAME}
 
