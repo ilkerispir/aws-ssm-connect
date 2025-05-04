@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -22,6 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/manifoldco/promptui"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/ini.v1"
 )
 
@@ -204,145 +206,169 @@ func fetchDBs(profile string) ([]DB, error) {
 
 	rdsClient := rds.NewFromConfig(cfg)
 	cacheClient := elasticache.NewFromConfig(cfg)
-	var dbs []DB
 
-	// --- RDS Section ---
-	clustersOut, err := rdsClient.DescribeDBClusters(context.TODO(), &rds.DescribeDBClustersInput{})
-	if err != nil {
-		return nil, err
-	}
+	var (
+		dbsMu sync.Mutex
+		dbs   []DB
+	)
 
-	// Fetch subnet groups
-	subnetGroupsOut, err := rdsClient.DescribeDBSubnetGroups(context.TODO(), &rds.DescribeDBSubnetGroupsInput{})
-	if err != nil {
-		return nil, err
-	}
-	subnetToVpc := make(map[string]string)
-	for _, sg := range subnetGroupsOut.DBSubnetGroups {
-		subnetToVpc[*sg.DBSubnetGroupName] = *sg.VpcId
-	}
+	eg, ctx := errgroup.WithContext(context.Background())
 
-	for _, cluster := range clustersOut.DBClusters {
-		eng := strings.ToLower(*cluster.Engine)
-		if strings.Contains(eng, "aurora") {
+	// --- RDS fetch in goroutine ---
+	eg.Go(func() error {
+		var localDBs []DB
+
+		clustersOut, err := rdsClient.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{})
+		if err != nil {
+			return err
+		}
+
+		subnetGroupsOut, err := rdsClient.DescribeDBSubnetGroups(ctx, &rds.DescribeDBSubnetGroupsInput{})
+		if err != nil {
+			return err
+		}
+		subnetToVpc := make(map[string]string)
+		for _, sg := range subnetGroupsOut.DBSubnetGroups {
+			subnetToVpc[*sg.DBSubnetGroupName] = *sg.VpcId
+		}
+
+		for _, cluster := range clustersOut.DBClusters {
+			eng := strings.ToLower(*cluster.Engine)
+			if strings.Contains(eng, "aurora") {
+				vpcId := ""
+				if cluster.DBSubnetGroup != nil {
+					if v, ok := subnetToVpc[*cluster.DBSubnetGroup]; ok {
+						vpcId = v
+					}
+				}
+				port := detectPort(*cluster.Engine)
+				if cluster.Endpoint != nil {
+					localDBs = append(localDBs, DB{Endpoint: *cluster.Endpoint, Port: port, VpcID: vpcId, Role: "writer"})
+				}
+				if cluster.ReaderEndpoint != nil {
+					localDBs = append(localDBs, DB{Endpoint: *cluster.ReaderEndpoint, Port: port, VpcID: vpcId, Role: "reader"})
+				}
+			}
+		}
+
+		instancesOut, err := rdsClient.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{})
+		if err != nil {
+			return err
+		}
+
+		for _, inst := range instancesOut.DBInstances {
+			if inst.ReadReplicaSourceDBInstanceIdentifier != nil || inst.DBClusterIdentifier != nil {
+				continue
+			}
+			ep := *inst.Endpoint.Address
+			port := fmt.Sprint(*inst.Endpoint.Port)
+			vpc := ""
+			if inst.DBSubnetGroup != nil && inst.DBSubnetGroup.VpcId != nil {
+				vpc = *inst.DBSubnetGroup.VpcId
+			}
+			localDBs = append(localDBs, DB{Endpoint: ep, Port: port, VpcID: vpc, Role: "instance"})
+		}
+
+		dbsMu.Lock()
+		dbs = append(dbs, localDBs...)
+		dbsMu.Unlock()
+		return nil
+	})
+
+	// --- ElastiCache fetch in goroutine ---
+	eg.Go(func() error {
+		var localDBs []DB
+
+		subnetGroupsOut, err := cacheClient.DescribeCacheSubnetGroups(ctx, &elasticache.DescribeCacheSubnetGroupsInput{})
+		if err != nil {
+			return fmt.Errorf("DescribeCacheSubnetGroups failed: %w", err)
+		}
+		subnetGroupVpcMap := make(map[string]string)
+		for _, sg := range subnetGroupsOut.CacheSubnetGroups {
+			if sg.CacheSubnetGroupName != nil && sg.VpcId != nil {
+				subnetGroupVpcMap[*sg.CacheSubnetGroupName] = *sg.VpcId
+			}
+		}
+
+		clusterIdToVpc := make(map[string]string)
+		cacheClustersOut, err := cacheClient.DescribeCacheClusters(ctx, &elasticache.DescribeCacheClustersInput{
+			ShowCacheNodeInfo: aws.Bool(true),
+		})
+		if err == nil {
+			for _, cc := range cacheClustersOut.CacheClusters {
+				if cc.CacheClusterId != nil && cc.CacheSubnetGroupName != nil {
+					if v, ok := subnetGroupVpcMap[*cc.CacheSubnetGroupName]; ok {
+						clusterIdToVpc[*cc.CacheClusterId] = v
+					}
+				}
+			}
+		}
+
+		replGroupsOut, err := cacheClient.DescribeReplicationGroups(ctx, &elasticache.DescribeReplicationGroupsInput{})
+		if err != nil {
+			return nil // skip ElastiCache silently, keep RDS
+		}
+
+		seen := make(map[string]bool)
+		for _, rg := range replGroupsOut.ReplicationGroups {
+			engine := strings.ToLower(*rg.Engine)
+			if engine != "redis" && engine != "valkey" {
+				continue
+			}
+			port := "6379"
 			vpcId := ""
-			if cluster.DBSubnetGroup != nil {
-				if v, ok := subnetToVpc[*cluster.DBSubnetGroup]; ok {
+			if len(rg.MemberClusters) > 0 {
+				if v, ok := clusterIdToVpc[rg.MemberClusters[0]]; ok {
 					vpcId = v
 				}
 			}
-			port := detectPort(*cluster.Engine)
-			if cluster.Endpoint != nil {
-				dbs = append(dbs, DB{Endpoint: *cluster.Endpoint, Port: port, VpcID: vpcId, Role: "writer"})
-			}
-			if cluster.ReaderEndpoint != nil {
-				dbs = append(dbs, DB{Endpoint: *cluster.ReaderEndpoint, Port: port, VpcID: vpcId, Role: "reader"})
-			}
-		}
-	}
 
-	// Fetch standalone instances
-	instancesOut, err := rdsClient.DescribeDBInstances(context.TODO(), &rds.DescribeDBInstancesInput{})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, inst := range instancesOut.DBInstances {
-		// Skip reader replicas and Aurora cluster members
-		if inst.ReadReplicaSourceDBInstanceIdentifier != nil || inst.DBClusterIdentifier != nil {
-			continue
-		}
-		ep := *inst.Endpoint.Address
-		port := fmt.Sprint(*inst.Endpoint.Port)
-		vpc := ""
-		if inst.DBSubnetGroup != nil && inst.DBSubnetGroup.VpcId != nil {
-			vpc = *inst.DBSubnetGroup.VpcId
-		}
-		dbs = append(dbs, DB{Endpoint: ep, Port: port, VpcID: vpc, Role: "instance"})
-	}
-
-	// --- Elasticache Section ---
-	subnetGroupsOut2, err := cacheClient.DescribeCacheSubnetGroups(context.TODO(), &elasticache.DescribeCacheSubnetGroupsInput{})
-	if err != nil {
-		return nil, fmt.Errorf("DescribeCacheSubnetGroups failed: %w", err)
-	}
-	subnetGroupVpcMap := make(map[string]string)
-	for _, sg := range subnetGroupsOut2.CacheSubnetGroups {
-		if sg.CacheSubnetGroupName != nil && sg.VpcId != nil {
-			subnetGroupVpcMap[*sg.CacheSubnetGroupName] = *sg.VpcId
-		}
-	}
-
-	// DescribeCacheClusters to map cluster ID to VPC ID
-	clusterIdToVpc := make(map[string]string)
-	cacheClustersOut, err := cacheClient.DescribeCacheClusters(context.TODO(), &elasticache.DescribeCacheClustersInput{
-		ShowCacheNodeInfo: aws.Bool(true),
-	})
-	if err == nil {
-		for _, cc := range cacheClustersOut.CacheClusters {
-			if cc.CacheClusterId != nil && cc.CacheSubnetGroupName != nil {
-				if v, ok := subnetGroupVpcMap[*cc.CacheSubnetGroupName]; ok {
-					clusterIdToVpc[*cc.CacheClusterId] = v
-				}
-			}
-		}
-	}
-
-	replGroupsOut, err := cacheClient.DescribeReplicationGroups(context.TODO(), &elasticache.DescribeReplicationGroupsInput{})
-	if err != nil {
-		return dbs, nil // return existing dbs even if Elasticache fails
-	}
-
-	seenRedisClusters := make(map[string]bool)
-	for _, rg := range replGroupsOut.ReplicationGroups {
-		engine := strings.ToLower(*rg.Engine)
-		if engine != "redis" && engine != "valkey" {
-			continue
-		}
-		port := "6379"
-		vpcId := ""
-		if len(rg.MemberClusters) > 0 {
-			clusterId := rg.MemberClusters[0]
-			if v, ok := clusterIdToVpc[clusterId]; ok {
-				vpcId = v
-			}
-		}
-
-		if rg.ConfigurationEndpoint != nil && rg.ConfigurationEndpoint.Address != nil {
-			addr := *rg.ConfigurationEndpoint.Address
-			if addr != "" && !seenRedisClusters[addr] {
-				seenRedisClusters[addr] = true
-				dbs = append(dbs, DB{
-					Endpoint: addr,
-					Port:     port,
-					VpcID:    vpcId,
-					Role:     fmt.Sprintf("%s-primary", engine),
-				})
-				continue
-			}
-		}
-
-		for _, ng := range rg.NodeGroups {
-			for _, ep := range ng.NodeGroupMembers {
-				if ep.ReadEndpoint == nil || ep.ReadEndpoint.Address == nil {
-					continue
-				}
-				addr := *ep.ReadEndpoint.Address
-				role := "replica"
-				if ep.CurrentRole != nil && *ep.CurrentRole == "primary" {
-					role = "primary"
-				}
-				if addr != "" && !seenRedisClusters[addr] {
-					seenRedisClusters[addr] = true
-					dbs = append(dbs, DB{
+			if rg.ConfigurationEndpoint != nil && rg.ConfigurationEndpoint.Address != nil {
+				addr := *rg.ConfigurationEndpoint.Address
+				if addr != "" && !seen[addr] {
+					seen[addr] = true
+					localDBs = append(localDBs, DB{
 						Endpoint: addr,
 						Port:     port,
 						VpcID:    vpcId,
-						Role:     fmt.Sprintf("%s-%s", engine, role),
+						Role:     fmt.Sprintf("%s-primary", engine),
 					})
+					continue
+				}
+			}
+
+			for _, ng := range rg.NodeGroups {
+				for _, ep := range ng.NodeGroupMembers {
+					if ep.ReadEndpoint == nil || ep.ReadEndpoint.Address == nil {
+						continue
+					}
+					addr := *ep.ReadEndpoint.Address
+					role := "replica"
+					if ep.CurrentRole != nil && *ep.CurrentRole == "primary" {
+						role = "primary"
+					}
+					if addr != "" && !seen[addr] {
+						seen[addr] = true
+						localDBs = append(localDBs, DB{
+							Endpoint: addr,
+							Port:     port,
+							VpcID:    vpcId,
+							Role:     fmt.Sprintf("%s-%s", engine, role),
+						})
+					}
 				}
 			}
 		}
+
+		dbsMu.Lock()
+		dbs = append(dbs, localDBs...)
+		dbsMu.Unlock()
+		return nil
+	})
+
+	// Wait for both goroutines
+	if err := eg.Wait(); err != nil {
+		return nil, err
 	}
 
 	sort.Slice(dbs, func(i, j int) bool {
