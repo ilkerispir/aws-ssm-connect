@@ -60,6 +60,30 @@ var (
 	lastSelectionPath = filepath.Join(os.Getenv("HOME"), ".aws-ssm-tunnel", "last-selections.json")
 	pidsFilePath      = filepath.Join(os.Getenv("HOME"), ".aws-ssm-tunnel", "pids.json")
 	version           = "dev"
+
+	engineToPort = map[string]string{
+		"mysql":             "3306",
+		"mariadb":           "3306",
+		"aurora-mysql":      "3306",
+		"postgres":          "5432",
+		"aurora-postgresql": "5432",
+		"sqlserver":         "1433",
+		"redis":             "6379",
+		"valkey":            "6379",
+		"memcached":         "11211",
+		"oracle":            "1521",
+		"mongodb":           "27017",
+	}
+
+	portToEngine = map[string]string{
+		"3306":  "MySQL",
+		"5432":  "PostgreSQL",
+		"1433":  "SQL Server",
+		"6379":  "Redis",
+		"11211": "Memcached",
+		"1521":  "Oracle",
+		"27017": "MongoDB",
+	}
 )
 
 func fetchProfiles() ([]string, error) {
@@ -156,46 +180,54 @@ func fetchInstances(profile string) ([]Instance, error) {
 }
 
 func formatDBLabel(db DB) string {
-	var prefix string
+	engine := detectEngineByPort(db.Port)
+
+	roleLabel := ""
 	switch db.Role {
 	case "writer":
-		prefix = "✍️ [Writer] "
+		roleLabel = "✍️ Writer"
 	case "reader":
-		prefix = "📖 [Reader] "
+		roleLabel = "📖 Reader"
 	case "primary":
-		prefix = "📕 [Primary] "
+		roleLabel = "📕 Primary"
 	case "replica":
-		prefix = "📘 [Replica] "
+		roleLabel = "📘 Replica"
+	case "instance":
+		roleLabel = "🧩 Instance"
 	default:
 		if strings.HasPrefix(db.Role, "redis") {
 			if strings.Contains(db.Role, "primary") {
-				prefix = "📕 [Redis Primary] "
+				roleLabel = "📕 Redis Primary"
 			} else {
-				prefix = "📘 [Redis Replica] "
+				roleLabel = "📘 Redis Replica"
 			}
 		} else if strings.HasPrefix(db.Role, "memcached") {
-			prefix = "📗 [Memcached] "
+			roleLabel = "📗 Memcached"
 		} else if strings.HasPrefix(db.Role, "valkey") {
-			prefix = "📙 [Valkey] "
+			roleLabel = "📙 Valkey"
 		} else {
-			prefix = ""
+			roleLabel = "❔"
 		}
 	}
-	return fmt.Sprintf("🛢️ %s%s:%s", prefix, db.Endpoint, db.Port)
+
+	return fmt.Sprintf("🛢️ [%s] %s - %s:%s", engine, roleLabel, db.Endpoint, db.Port)
 }
 
 func detectPort(engine string) string {
 	eng := strings.ToLower(engine)
-	switch {
-	case strings.Contains(eng, "mysql"), strings.Contains(eng, "mariadb"), strings.Contains(eng, "aurora-mysql"):
-		return "3306"
-	case strings.Contains(eng, "postgres"), strings.Contains(eng, "aurora-postgresql"):
-		return "5432"
-	case strings.Contains(eng, "sqlserver"):
-		return "1433"
-	default:
-		return "3306"
+	for k, port := range engineToPort {
+		if strings.Contains(eng, k) {
+			return port
+		}
 	}
+	return "3306" // default fallback
+}
+
+func detectEngineByPort(port string) string {
+	if eng, ok := portToEngine[port]; ok {
+		return eng
+	}
+	return "Unknown"
 }
 
 func fetchDBs(profile string) ([]DB, error) {
@@ -384,7 +416,7 @@ func startPortForward(profile, instanceName, instanceID, host, remotePort, local
 		return fmt.Errorf("local port %s already in use", localPort)
 	}
 
-	fmt.Printf("\n✅ Starting port-forward from:\n💻 localhost:%s → 🛢️  %s (%s) → 📂 %s:%s\n\n", localPort, instanceName, instanceID, host, remotePort)
+	fmt.Printf("\n✅ Starting port-forward from:\n💻 localhost:%s → 🖥  %s (%s) → 🛢️ %s:%s\n\n", localPort, instanceName, instanceID, host, remotePort)
 	cmd := exec.Command(
 		"aws", "ssm", "start-session",
 		"--profile", profile,
