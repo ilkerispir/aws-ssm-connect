@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/rds v1.94.4
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.58.2
 	github.com/manifoldco/promptui v0.9.0
+	golang.org/x/sync v0.13.0
 	gopkg.in/ini.v1 v1.67.0
 )
 
@@ -27,6 +28,5 @@ require (
 	github.com/aws/smithy-go v1.22.2 // indirect
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
 	github.com/stretchr/testify v1.3.0 // indirect
-	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.0.0-20181122145206-62eef0e2fa9b // indirect
 )
