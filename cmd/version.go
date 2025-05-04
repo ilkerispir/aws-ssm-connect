@@ -1,10 +1,9 @@
-// cmd/version.go
 package cmd
 
 import "fmt"
 
-var version = "dev"
+var Version = "dev"
 
 func ShowVersion() {
-	fmt.Println("aws-ssm-tunnel version:", version)
+	fmt.Println("aws-ssm-tunnel version:", Version)
 }
