@@ -4,11 +4,12 @@ import "fmt"
 
 func ShowHelper() {
 	fmt.Println(`
-AWS SSM RDS Proxy - Quick Connect Tool
+AWS SSM Tunnel CLI
 
 Usage:
   aws-ssm-tunnel                                          # Interactive mode (prompts)
-  aws-ssm-tunnel --profile <profile> --filter <keyword>   # Quick connect mode
+  aws-ssm-tunnel --profile <profile> --filter <keyword>   # Quick connect to database
+  aws-ssm-tunnel --ssm --profile <profile>                # Start SSM shell session to EC2
   aws-ssm-tunnel --list                                   # List active port-forward sessions
   aws-ssm-tunnel --kill <pid>                             # Kill a specific port-forward session by PID
   aws-ssm-tunnel --kill-all                               # Kill all active port-forward sessions
@@ -16,26 +17,20 @@ Usage:
   aws-ssm-tunnel --version                                # Show version
 
 Flags:
---profile    AWS profile name to use (e.g., my-aws-profile)
---filter     Keyword to match instance name (e.g., prod, dev, uat)
---list       List active port-forward sessions
---kill       Kill a specific session by PID
---kill-all   Kill all active port-forward sessions
---help       Show this helper message
---version    Show version
+--profile    AWS profile to use (e.g., dev, prod)
+--filter     Filter for EC2 instance name (for DB tunneling)
+--port       Local port override (optional)
+--ssm        Start standard SSM shell session to EC2 instance
+--list       Show active port-forward sessions
+--kill       Kill a session by PID
+--kill-all   Kill all active sessions
+--version    Show version info
+--help       Show this help message
 
 Examples:
-aws-ssm-tunnel --profile my-aws-profile --filter dev
-aws-ssm-tunnel --list
+aws-ssm-tunnel --profile dev --filter prod-db
+aws-ssm-tunnel --ssm --profile dev
 aws-ssm-tunnel --kill 12345
-aws-ssm-tunnel --kill-all
-
-Behavior:
-- Searches for an instance matching the filter keyword
-- Finds a writer database (or standalone RDS instance) in the same VPC
-- Starts a background port-forwarding session automatically
-- Manages sessions with PID tracking
-- Automatically cleans up dead sessions
-- Prevents port conflicts by checking local port availability
+aws-ssm-tunnel --list
 `)
 }

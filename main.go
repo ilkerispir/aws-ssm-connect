@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,9 +18,14 @@ func main() {
 	list := flag.Bool("list", false, "List active port-forward sessions")
 	kill := flag.Int("kill", 0, "Kill a port-forward session by PID")
 	killAll := flag.Bool("kill-all", false, "Kill all active port-forward sessions")
+	ssm := flag.Bool("ssm", false, "Start standard SSM shell session to EC2")
 	help := flag.Bool("help", false, "Show usage information")
 	version := flag.Bool("version", false, "Show version")
 	flag.Parse()
+
+	if err := cmd.SelectProfileIfEmpty(profile); err != nil {
+		log.Fatalf("profile selection failed: %v", err)
+	}
 
 	// Graceful cleanup on Ctrl+C or SIGTERM
 	c := make(chan os.Signal, 1)
@@ -43,6 +49,11 @@ func main() {
 		cmd.KillAllSessions()
 	case *profile != "" && *filter != "":
 		cmd.QuickConnect(*profile, *filter, *port)
+	case *ssm:
+		err := cmd.StartSSMSession(*profile)
+		if err != nil {
+			log.Fatalf("SSM session failed: %v", err)
+		}
 	default:
 		if err := cmd.Interactive(); err != nil {
 			panic(err)
