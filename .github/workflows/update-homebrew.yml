@@ -12,17 +12,17 @@ jobs:
       - name: Checkout homebrew tap repo
         uses: actions/checkout@v3
         with:
-          repository: ilkerispir/homebrew-aws-ssm-tunnel
+          repository: ilkerispir/homebrew-aws-ssm-connect
           token: ${{ secrets.GH_PAT }}
           path: homebrew-tap
 
       - name: Download release binaries and compute hashes
         run: |
           VERSION=${GITHUB_REF##*/}
-          curl -LO https://github.com/ilkerispir/aws-ssm-tunnel/releases/download/$VERSION/aws-ssm-tunnel-darwin-arm64.tar.gz
-          curl -LO https://github.com/ilkerispir/aws-ssm-tunnel/releases/download/$VERSION/aws-ssm-tunnel-darwin-amd64.tar.gz
-          echo "ARM_SHA=$(shasum -a 256 aws-ssm-tunnel-darwin-arm64.tar.gz | awk '{print $1}')" >> $GITHUB_ENV
-          echo "AMD_SHA=$(shasum -a 256 aws-ssm-tunnel-darwin-amd64.tar.gz | awk '{print $1}')" >> $GITHUB_ENV
+          curl -LO https://github.com/ilkerispir/aws-ssm-connect/releases/download/$VERSION/aws-ssm-connect-darwin-arm64.tar.gz
+          curl -LO https://github.com/ilkerispir/aws-ssm-connect/releases/download/$VERSION/aws-ssm-connect-darwin-amd64.tar.gz
+          echo "ARM_SHA=$(shasum -a 256 aws-ssm-connect-darwin-arm64.tar.gz | awk '{print $1}')" >> $GITHUB_ENV
+          echo "AMD_SHA=$(shasum -a 256 aws-ssm-connect-darwin-amd64.tar.gz | awk '{print $1}')" >> $GITHUB_ENV
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Update Formula file
@@ -30,19 +30,19 @@ jobs:
           cd homebrew-tap/Formula
 
           # Update version and URLs
-          sed -i.bak "s/version \".*\"/version \"$VERSION\"/" aws-ssm-tunnel.rb
-          sed -i.bak "s|download/.*/aws-ssm-tunnel-darwin-arm64.tar.gz|download/$VERSION/aws-ssm-tunnel-darwin-arm64.tar.gz|" aws-ssm-tunnel.rb
-          sed -i.bak "s|download/.*/aws-ssm-tunnel-darwin-amd64.tar.gz|download/$VERSION/aws-ssm-tunnel-darwin-amd64.tar.gz|" aws-ssm-tunnel.rb
+          sed -i.bak "s/version \".*\"/version \"$VERSION\"/" aws-ssm-connect.rb
+          sed -i.bak "s|download/.*/aws-ssm-connect-darwin-arm64.tar.gz|download/$VERSION/aws-ssm-connect-darwin-arm64.tar.gz|" aws-ssm-connect.rb
+          sed -i.bak "s|download/.*/aws-ssm-connect-darwin-amd64.tar.gz|download/$VERSION/aws-ssm-connect-darwin-amd64.tar.gz|" aws-ssm-connect.rb
 
           # Update sha256 for each arch individually
-          sed -i.bak "/darwin-arm64.tar.gz/{n;s/sha256 \".*\"/sha256 \"$ARM_SHA\"/;}" aws-ssm-tunnel.rb
-          sed -i.bak "/darwin-amd64.tar.gz/{n;s/sha256 \".*\"/sha256 \"$AMD_SHA\"/;}" aws-ssm-tunnel.rb
+          sed -i.bak "/darwin-arm64.tar.gz/{n;s/sha256 \".*\"/sha256 \"$ARM_SHA\"/;}" aws-ssm-connect.rb
+          sed -i.bak "/darwin-amd64.tar.gz/{n;s/sha256 \".*\"/sha256 \"$AMD_SHA\"/;}" aws-ssm-connect.rb
 
       - name: Commit and push
         run: |
           cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/aws-ssm-tunnel.rb
+          git add Formula/aws-ssm-connect.rb
           git commit -m "chore: update formula to $VERSION"
           git push

@@ -1,19 +1,22 @@
-# aws-ssm-tunnel
+# aws-ssm-connect
 
-⚡ CLI tool to port-forward to private **RDS** (and soon **ElastiCache**) databases via EC2 instances using AWS SSM Session Manager.
+⚡ A powerful CLI to port-forward into private **RDS**, **Aurora**, and **ElastiCache** (Redis, Memcached) endpoints through EC2 instances using AWS SSM Session Manager — fully interactive, no SSH required.
 
 ## Features
-- 🔍 Interactive profile / instance / database selection (SSO-aware)
-- ⚡ Quick-connect mode via `--profile` and `--filter`
-- 🧵 Background port-forward sessions (non-blocking)
-- 🔢 PID tracking for active sessions
-- 📋 List active sessions with `--list`
-- ❌ Kill specific sessions with `--kill <pid>`
-- 💥 Kill all sessions with `--kill-all`
-- 🧹 Auto cleanup of dead sessions
-- 🚫 Detects local port conflicts before forwarding
+- ☁️ Interactive profile / EC2 / database selection (SSO-aware)
+- 🚀 Quick connect via `--profile` and `--filter`
+- 🔐 SSM-based secure access (no open ports or bastion hosts)
+- 🔄 Port-forward RDS, Aurora, Redis, Memcached — all in one tool
+- 🧵 Background port-forwarding (non-blocking, persistent)
+- 🔢 Tracks active sessions by PID
+- 📋 List active tunnels with `--list`
+- ❌ Kill specific tunnels with `--kill <pid>`
+- 💥 Kill all tunnels with `--kill-all`
+- 🧹 Automatically cleans up dead sessions
+- ⚠️ Prevents local port conflicts
 
 ## Installation
 
 ```bash
-go install github.com/ilkerispir/aws-ssm-tunnel@latest
+brew tap ilkerispir/tap
+brew install aws-ssm-connect

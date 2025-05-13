@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ilkerispir/aws-ssm-tunnel/cmd"
+	"github.com/ilkerispir/aws-ssm-connect/cmd"
 )
 
 func main() {

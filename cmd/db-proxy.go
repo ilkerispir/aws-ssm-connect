@@ -5,9 +5,9 @@ import (
 	"log"
 	"strings"
 
-	"github.com/ilkerispir/aws-ssm-tunnel/internal/aws"
-	"github.com/ilkerispir/aws-ssm-tunnel/internal/tunnel"
-	"github.com/ilkerispir/aws-ssm-tunnel/internal/ui"
+	"github.com/ilkerispir/aws-ssm-connect/internal/aws"
+	"github.com/ilkerispir/aws-ssm-connect/internal/tunnel"
+	"github.com/ilkerispir/aws-ssm-connect/internal/ui"
 	"github.com/manifoldco/promptui"
 )
 

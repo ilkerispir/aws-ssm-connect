@@ -16,7 +16,7 @@ type PIDInfo struct {
 	DB       string `json:"db"`
 }
 
-var pidsFilePath = filepath.Join(os.Getenv("HOME"), ".aws-ssm-tunnel", "pids.json")
+var pidsFilePath = filepath.Join(os.Getenv("HOME"), ".aws-ssm-connect", "pids.json")
 
 // SavePID appends a new PID record to pids.json
 func SavePID(info PIDInfo) error {

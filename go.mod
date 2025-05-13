@@ -1,4 +1,4 @@
-module github.com/ilkerispir/aws-ssm-tunnel
+module github.com/ilkerispir/aws-ssm-connect
 
 go 1.24.2
 

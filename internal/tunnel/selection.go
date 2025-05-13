@@ -14,7 +14,7 @@ type LastSelection struct {
 	DBPort       string `json:"db_port"`
 }
 
-var lastSelectionPath = filepath.Join(os.Getenv("HOME"), ".aws-ssm-tunnel", "last-selections.json")
+var lastSelectionPath = filepath.Join(os.Getenv("HOME"), ".aws-ssm-connect", "last-selections.json")
 
 // WriteLastSelection persists the last successful connection
 func WriteLastSelection(sel *LastSelection) error {

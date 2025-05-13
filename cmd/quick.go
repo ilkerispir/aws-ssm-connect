@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ilkerispir/aws-ssm-tunnel/internal/aws"
-	"github.com/ilkerispir/aws-ssm-tunnel/internal/tunnel"
+	"github.com/ilkerispir/aws-ssm-connect/internal/aws"
+	"github.com/ilkerispir/aws-ssm-connect/internal/tunnel"
 )
 
 // QuickConnect establishes a port-forward by filtering instance + selecting DB in same VPC

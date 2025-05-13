@@ -7,15 +7,15 @@ func ShowHelper() {
 AWS SSM Tunnel CLI
 
 Usage:
-  aws-ssm-tunnel                                          # Interactive mode (prompts)
-  aws-ssm-tunnel --profile <profile> --filter <keyword>   # Quick connect to database
-  aws-ssm-tunnel --ssm --profile <profile>                # Start SSM shell session to EC2
-  aws-ssm-tunnel --db-port-forward --profile <profile>    # Port-forward to a selected DB proxy via EC2
-  aws-ssm-tunnel --list                                   # List active port-forward sessions
-  aws-ssm-tunnel --kill <pid>                             # Kill a specific port-forward session by PID
-  aws-ssm-tunnel --kill-all                               # Kill all active port-forward sessions
-  aws-ssm-tunnel --help                                   # Show this helper message
-  aws-ssm-tunnel --version                                # Show version
+  aws-ssm-connect                                          # Interactive mode (prompts)
+  aws-ssm-connect --profile <profile> --filter <keyword>   # Quick connect to database
+  aws-ssm-connect --ssm --profile <profile>                # Start SSM shell session to EC2
+  aws-ssm-connect --db-port-forward --profile <profile>    # Port-forward to a selected DB proxy via EC2
+  aws-ssm-connect --list                                   # List active port-forward sessions
+  aws-ssm-connect --kill <pid>                             # Kill a specific port-forward session by PID
+  aws-ssm-connect --kill-all                               # Kill all active port-forward sessions
+  aws-ssm-connect --help                                   # Show this helper message
+  aws-ssm-connect --version                                # Show version
 
 Flags:
 --profile            AWS profile to use (e.g., dev, prod)
@@ -30,10 +30,10 @@ Flags:
 --help               Show this help message
 
 Examples:
-aws-ssm-tunnel --profile dev --filter prod-db
-aws-ssm-tunnel --ssm --profile dev
-aws-ssm-tunnel --db-port-forward --profile dev
-aws-ssm-tunnel --kill 12345
-aws-ssm-tunnel --list
+aws-ssm-connect --profile dev --filter prod-db
+aws-ssm-connect --ssm --profile dev
+aws-ssm-connect --db-port-forward --profile dev
+aws-ssm-connect --kill 12345
+aws-ssm-connect --list
 `)
 }

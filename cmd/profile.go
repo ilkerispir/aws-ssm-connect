@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/ilkerispir/aws-ssm-tunnel/internal/aws"
-	"github.com/ilkerispir/aws-ssm-tunnel/internal/ui"
+	"github.com/ilkerispir/aws-ssm-connect/internal/aws"
+	"github.com/ilkerispir/aws-ssm-connect/internal/ui"
 )
 
 func SelectProfileIfEmpty(profile *string) error {

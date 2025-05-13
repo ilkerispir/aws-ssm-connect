@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/ilkerispir/aws-ssm-tunnel/internal/aws"
+	"github.com/ilkerispir/aws-ssm-connect/internal/aws"
 	"github.com/manifoldco/promptui"
 )
 

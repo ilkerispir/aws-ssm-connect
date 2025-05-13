@@ -3,7 +3,7 @@ package cmd
 import (
 	"log"
 
-	"github.com/ilkerispir/aws-ssm-tunnel/internal/tunnel"
+	"github.com/ilkerispir/aws-ssm-connect/internal/tunnel"
 )
 
 func ListSessions() {
