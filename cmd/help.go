@@ -18,16 +18,16 @@ Usage:
   aws-ssm-tunnel --version                                # Show version
 
 Flags:
---profile     AWS profile to use (e.g., dev, prod)
---filter      Filter for EC2 instance name (for DB tunneling)
---port        Local port override (optional)
---ssm         Start standard SSM shell session to EC2 instance
+--profile            AWS profile to use (e.g., dev, prod)
+--filter             Filter for EC2 instance name (for DB tunneling)
+--port               Local port override (optional)
+--ssm                Start standard SSM shell session to EC2 instance
 --db-port-forward    Port-forward to a selected RDS proxy via EC2
---list        Show active port-forward sessions
---kill        Kill a session by PID
---kill-all    Kill all active sessions
---version     Show version info
---help        Show this help message
+--list               Show active port-forward sessions
+--kill               Kill a session by PID
+--kill-all           Kill all active sessions
+--version            Show version info
+--help               Show this help message
 
 Examples:
 aws-ssm-tunnel --profile dev --filter prod-db
