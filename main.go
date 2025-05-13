@@ -21,7 +21,7 @@ func main() {
 	ssm := flag.Bool("ssm", false, "Start standard SSM shell session to EC2")
 	help := flag.Bool("help", false, "Show usage information")
 	version := flag.Bool("version", false, "Show version")
-	dbproxy := flag.Bool("db-proxy", false, "Start port-forward to DB proxy via EC2")
+	dbproxy := flag.Bool("db-port-forward", false, "Start port-forward to DB proxy via EC2")
 	flag.Parse()
 
 	if *ssm || *dbproxy || (*profile == "" && *filter != "") {
