@@ -10,7 +10,7 @@ Usage:
   aws-ssm-tunnel                                          # Interactive mode (prompts)
   aws-ssm-tunnel --profile <profile> --filter <keyword>   # Quick connect to database
   aws-ssm-tunnel --ssm --profile <profile>                # Start SSM shell session to EC2
-  aws-ssm-tunnel --db-port-forward --profile <profile>           # Port-forward to a selected DB proxy via EC2
+  aws-ssm-tunnel --db-port-forward --profile <profile>    # Port-forward to a selected DB proxy via EC2
   aws-ssm-tunnel --list                                   # List active port-forward sessions
   aws-ssm-tunnel --kill <pid>                             # Kill a specific port-forward session by PID
   aws-ssm-tunnel --kill-all                               # Kill all active port-forward sessions
