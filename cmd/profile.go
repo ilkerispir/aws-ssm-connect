@@ -2,10 +2,9 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/ilkerispir/aws-ssm-tunnel/internal/aws"
-	"github.com/manifoldco/promptui"
+	"github.com/ilkerispir/aws-ssm-tunnel/internal/ui"
 )
 
 func SelectProfileIfEmpty(profile *string) error {
@@ -21,18 +20,11 @@ func SelectProfileIfEmpty(profile *string) error {
 		return fmt.Errorf("no AWS profiles found")
 	}
 
-	prompt := promptui.Select{
-		Label: "Select AWS Profile",
-		Items: profiles,
-		Searcher: func(input string, index int) bool {
-			return strings.Contains(strings.ToLower(profiles[index]), strings.ToLower(input))
-		},
-	}
-	idx, _, err := prompt.Run()
+	selected, err := ui.PromptProfile(profiles)
 	if err != nil {
 		return err
 	}
 
-	*profile = profiles[idx]
+	*profile = selected
 	return nil
 }
